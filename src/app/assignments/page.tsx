@@ -118,7 +118,7 @@ export default function Assignments() {
         case 'dueDate':
           return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime()
         case 'priority':
-          const priorityOrder = { high: 3, medium: 2, low: 1 }
+          const priorityOrder: { [key: string]: number } = { high: 3, medium: 2, low: 1 }
           return priorityOrder[b.priority] - priorityOrder[a.priority]
         case 'course':
           return a.course.localeCompare(b.course)

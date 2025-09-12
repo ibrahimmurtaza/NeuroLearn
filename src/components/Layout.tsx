@@ -20,7 +20,7 @@ export default function Layout({ children }: LayoutProps) {
 
   // Public routes that don't require authentication
   const publicRoutes = ['/auth/login', '/auth/register', '/auth/forgot-password']
-  const isPublicRoute = publicRoutes.includes(pathname)
+  const isPublicRoute = pathname ? publicRoutes.includes(pathname) : false
 
   useEffect(() => {
     // Redirect to login if not authenticated and not on a public route

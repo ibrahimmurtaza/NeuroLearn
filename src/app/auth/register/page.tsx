@@ -85,10 +85,7 @@ export default function RegisterPage() {
     }
 
     try {
-      await signUp(formData.email, formData.password, {
-        firstName: formData.firstName,
-        lastName: formData.lastName
-      })
+      await signUp(formData.email, formData.password, `${formData.firstName} ${formData.lastName}`)
       setSuccess('Account created successfully! Please check your email to verify your account.')
       // Optionally redirect after a delay
       setTimeout(() => {

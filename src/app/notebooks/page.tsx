@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import { supabase } from '@/lib/supabase';
 import { Plus, MoreVertical, Edit, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -26,7 +26,6 @@ export default function NotebooksPage() {
   const [editNotebookTitle, setEditNotebookTitle] = useState('');
   const [dropdownOpen, setDropdownOpen] = useState<string | null>(null);
   const router = useRouter();
-  const supabase = createClientComponentClient();
 
   useEffect(() => {
     const checkAuth = async () => {

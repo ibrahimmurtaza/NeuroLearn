@@ -22,7 +22,7 @@ export default function Profile() {
     major: 'Computer Science',
     year: 'Junior',
     gpa: '3.85',
-    avatar: null,
+    avatar: null as string | null,
   })
 
   const [preferences, setPreferences] = useState({
@@ -85,7 +85,10 @@ export default function Profile() {
     if (file) {
       const reader = new FileReader()
       reader.onload = (e) => {
-        setProfileData({ ...profileData, avatar: e.target?.result as string })
+        const result = e.target?.result
+        if (result && typeof result === 'string') {
+          setProfileData({ ...profileData, avatar: result })
+        }
       }
       reader.readAsDataURL(file)
     }

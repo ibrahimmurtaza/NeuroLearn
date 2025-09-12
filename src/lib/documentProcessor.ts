@@ -23,14 +23,7 @@ export class DocumentProcessor {
   private async extractDocxContent(buffer: Buffer): Promise<string> {
     try {
       // Use mammoth with enhanced options for better text extraction
-      const result = await mammoth.extractRawText({ 
-        buffer,
-        // Enhanced options for better extraction
-        options: {
-          includeEmbeddedStyleMap: true,
-          includeDefaultStyleMap: true
-        }
-      });
+      const result = await mammoth.extractRawText({ buffer });
       
       let content = result.value;
       

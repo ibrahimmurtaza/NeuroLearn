@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { ArrowLeft, Plus, Search, Send, Paperclip, Upload, X, FileText, Loader2, Trash2 } from 'lucide-react';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import { supabase } from '@/lib/supabase';
 
 interface Notebook {
   id: string;
@@ -42,7 +42,6 @@ export default function NotebookDetailPage() {
   const [sourceToDelete, setSourceToDelete] = useState<Source | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const supabase = createClientComponentClient();
 
   useEffect(() => {
     if (params?.id) {
@@ -203,10 +202,10 @@ export default function NotebookDetailPage() {
     if (!files || files.length === 0) return;
 
     const file = files[0];
-    const allowedTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain'];
+    const allowedTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain', 'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'];
     
     if (!allowedTypes.includes(file.type)) {
-      setUploadError('Please select a PDF, DOC, DOCX, or TXT file.');
+      setUploadError('Please select a PDF, DOC, DOCX, TXT, PPT, or PPTX file.');
       return;
     }
 
@@ -559,14 +558,14 @@ export default function NotebookDetailPage() {
         {/* Fixed Chat Input */}
         <div className="bg-white/90 backdrop-blur-sm border-t border-gray-200/50 p-3 lg:p-4 sticky bottom-0">
           <div className="max-w-4xl mx-auto">
-            <div className="flex items-end gap-2 lg:gap-3">
+            <div className="flex items-start gap-3 lg:gap-4">
               <div className="flex-1 relative">
                 <div className="relative">
                   <textarea
                     value={chatMessage}
                     onChange={(e) => setChatMessage(e.target.value)}
                     placeholder="Ask anything about your documents..."
-                    className="w-full px-3 py-2 pr-10 lg:px-4 lg:py-3 lg:pr-12 border border-gray-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none min-h-[40px] lg:min-h-[48px] max-h-32 bg-white/80 backdrop-blur-sm transition-all duration-200 shadow-sm hover:shadow-md text-sm lg:text-base"
+                    className="w-full px-4 py-3 pr-12 lg:px-5 lg:py-4 lg:pr-14 border border-gray-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none min-h-[48px] lg:min-h-[52px] max-h-32 bg-white/80 backdrop-blur-sm transition-all duration-200 shadow-sm hover:shadow-md text-sm lg:text-base leading-relaxed"
                     onKeyPress={(e) => {
                       if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();
@@ -575,7 +574,7 @@ export default function NotebookDetailPage() {
                     }}
                     rows={1}
                   />
-                  <button className="absolute right-2 lg:right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors">
+                  <button className="absolute right-3 lg:right-4 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors">
                     <Paperclip className="w-4 h-4 lg:w-5 lg:h-5" />
                   </button>
                 </div>
@@ -594,12 +593,12 @@ export default function NotebookDetailPage() {
               <button
                 onClick={handleSendMessage}
                 disabled={!chatMessage.trim() || isLoadingChat}
-                className="p-2 lg:p-3 bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-2xl hover:from-blue-600 hover:to-blue-700 disabled:from-gray-300 disabled:to-gray-400 disabled:cursor-not-allowed transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105 disabled:transform-none"
+                className="flex-shrink-0 w-12 h-12 lg:w-14 lg:h-14 bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-2xl hover:from-blue-600 hover:to-blue-700 disabled:from-gray-300 disabled:to-gray-400 disabled:cursor-not-allowed transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105 disabled:transform-none flex items-center justify-center"
               >
                 {isLoadingChat ? (
-                  <Loader2 className="w-4 h-4 lg:w-5 lg:h-5 animate-spin" />
+                  <Loader2 className="w-5 h-5 lg:w-6 lg:h-6 animate-spin" />
                 ) : (
-                  <Send className="w-4 h-4 lg:w-5 lg:h-5" />
+                  <Send className="w-5 h-5 lg:w-6 lg:h-6" />
                 )}
               </button>
             </div>
@@ -637,14 +636,14 @@ export default function NotebookDetailPage() {
                   Click to select a file or drag and drop
                 </p>
                 <p className="text-xs text-gray-500">
-                  PDF, DOC, DOCX, TXT (max 10MB)
+                  PDF, DOC, DOCX, TXT, PPT, PPTX (max 10MB)
                 </p>
               </div>
               
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".pdf,.doc,.docx,.txt"
+                accept=".pdf,.doc,.docx,.txt,.ppt,.pptx"
                 onChange={handleFileChange}
                 className="hidden"
               />

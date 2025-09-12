@@ -1,3 +1,9 @@
+// Client-side email validation - no Node.js modules
+// For server-side validation, use API routes
+
+// Constants
+const DEFAULT_TIMEOUT = 10000; // 10 seconds
+
 // TypeScript interfaces and types for client-side validation
 export interface EmailValidationResult {
   isValid: boolean;
@@ -89,90 +95,34 @@ export function validateEmailFormat(email: string): boolean {
 }
 
 /**
- * Domain validation using DNS lookup
+ * Domain validation (client-side basic check)
+ * For full DNS validation, use server-side API
  * @param domain - Domain to validate
- * @param timeout - Timeout in milliseconds
- * @returns Promise<boolean> indicating if domain exists
+ * @returns boolean indicating if domain format is valid
  */
-export async function validateDomain(domain: string, timeout: number = DEFAULT_TIMEOUT): Promise<boolean> {
-  try {
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error('DNS lookup timeout')), timeout);
-    });
-    
-    await Promise.race([
-      dnsLookup(domain),
-      timeoutPromise
-    ]);
-    
-    return true;
-  } catch (error) {
-    console.warn(`Domain validation failed for ${domain}:`, error);
+export function validateDomainFormat(domain: string): boolean {
+  if (!domain || typeof domain !== 'string') {
     return false;
   }
+  
+  // Basic domain format validation
+  const domainRegex = /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?))*$/;
+  return domainRegex.test(domain) && domain.length <= 253;
 }
 
 /**
- * SMTP mailbox validation
+ * Basic email validation (client-side only)
+ * For full SMTP validation, use server-side API
  * @param email - Email address to validate
- * @param timeout - Timeout in milliseconds
- * @returns Promise<boolean> indicating if mailbox exists
+ * @returns boolean indicating if email format is valid
  */
-export async function validateMailbox(email: string, timeout: number = DEFAULT_TIMEOUT): Promise<boolean> {
-  const domain = email.split('@')[1];
-  
-  try {
-    // Get MX records
-    const mxRecords = await Promise.race([
-      dnsResolveMx(domain),
-      new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error('MX lookup timeout')), timeout);
-      })
-    ]);
-    
-    if (!mxRecords || mxRecords.length === 0) {
-      return false;
-    }
-    
-    // Sort MX records by priority
-    mxRecords.sort((a, b) => a.priority - b.priority);
-    
-    // Try to connect to the first MX server
-    const mxHost = mxRecords[0].exchange;
-    
-    return new Promise((resolve) => {
-      const socket = net.createConnection(25, mxHost);
-      let isResolved = false;
-      
-      const cleanup = () => {
-        if (!isResolved) {
-          isResolved = true;
-          socket.destroy();
-        }
-      };
-      
-      const timeoutId = setTimeout(() => {
-        cleanup();
-        resolve(false);
-      }, timeout);
-      
-      socket.on('connect', () => {
-        clearTimeout(timeoutId);
-        cleanup();
-        resolve(true);
-      });
-      
-      socket.on('error', (err) => {
-        console.warn(`SMTP validation failed for ${email}:`, err);
-        clearTimeout(timeoutId);
-        cleanup();
-        resolve(false);
-      });
-    });
-  } catch (error) {
-    console.warn(`Mailbox validation failed for ${email}:`, error);
+export function validateEmailBasic(email: string): boolean {
+  if (!validateEmailFormat(email)) {
     return false;
   }
+  
+  const domain = email.split('@')[1];
+  return validateDomainFormat(domain);
 }
 
 /**

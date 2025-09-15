@@ -2,6 +2,9 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Translation Feature Styles */
+@import '../styles/translation.css';
+
 /* Custom animations for chat interface */
 @keyframes fadeIn {
   from {

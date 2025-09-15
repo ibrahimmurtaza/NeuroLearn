@@ -1,21 +1,21 @@
-import { createBrowserClient } from '@supabase/ssr'
-import type { SupabaseClient } from '@supabase/supabase-js'
+import { createBrowserClient } from '@supabase/ssr';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+let supabaseInstance: any = null;
 
-// Singleton pattern to ensure only one Supabase client instance
-let supabaseInstance: SupabaseClient | null = null;
-
-function getSupabaseClient(): SupabaseClient {
+export function createClient() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+  
   if (!supabaseInstance) {
     supabaseInstance = createBrowserClient(supabaseUrl, supabaseAnonKey);
   }
-  return supabaseInstance;
+  
+  return supabaseInstance!;
 }
 
 // Export the singleton instance
-export const supabase = getSupabaseClient();
+export const supabase = createClient();
 
 // Types for our database
 export type Database = {

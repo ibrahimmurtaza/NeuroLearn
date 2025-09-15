@@ -2,8 +2,14 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, Plus, Search, Send, Paperclip, Upload, X, FileText, Loader2, Trash2 } from 'lucide-react';
+import { ArrowLeft, Plus, Search, Send, Paperclip, Upload, X, FileText, Loader2, Trash2, Languages, ChevronDown } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { useVoiceRecognition } from '@/hooks/useVoiceRecognition';
+import { VoiceInputButton } from '@/components/VoiceInputButton';
+import { VoiceInputIndicator } from '@/components/AudioVisualization';
+import useTranslation from '@/hooks/useTranslation';
+
+import { toast } from 'sonner';
 
 interface Notebook {
   id: string;
@@ -41,7 +47,109 @@ export default function NotebookDetailPage() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [sourceToDelete, setSourceToDelete] = useState<Source | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [translatedMessages, setTranslatedMessages] = useState<{[key: number]: {text: string, language: string}}>({});
+  const [translatingMessageIndex, setTranslatingMessageIndex] = useState<number | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+
+
+  // Translation functionality
+  const {
+    translate,
+    isTranslating,
+    error: translationError,
+    translatedText,
+    confidence,
+    clearTranslation
+  } = useTranslation();
+
+  // Voice recognition functionality
+  const {
+    isRecording,
+    transcript,
+    audioLevel,
+    error: voiceError,
+    isSupported,
+    startRecording,
+    stopRecording,
+    resetTranscript
+  } = useVoiceRecognition({
+    continuous: true,
+    interimResults: true,
+    language: 'en-US'
+  });
+
+  // Handle voice input completion
+  useEffect(() => {
+    if (transcript && !isRecording) {
+      setChatMessage(prev => prev + (prev ? ' ' : '') + transcript);
+      // Auto-clear context after voice query to ensure fresh context
+      if (conversations.length > 0) {
+        setConversations([]);
+        toast.success('Voice query started with fresh context');
+      }
+      // Reset transcript after processing to ensure fresh state for next query
+      resetTranscript();
+    }
+  }, [transcript, isRecording, conversations.length, resetTranscript]);
+
+  // Handle voice recognition errors
+  useEffect(() => {
+    if (voiceError) {
+      toast.error(`Voice recognition error: ${voiceError}`);
+    }
+  }, [voiceError]);
+
+  // Voice input handlers
+  const handleVoiceStart = () => {
+    if (!isSupported) {
+      toast.error('Voice recognition is not supported in your browser');
+      return;
+    }
+    startRecording();
+  };
+
+  const handleVoiceStop = () => {
+    stopRecording();
+  };
+
+  const handleClearContext = () => {
+    setConversations([]);
+    toast.success('Conversation context cleared');
+  };
+
+  // Inline translation handler
+  const handleInlineTranslate = async (messageIndex: number, messageContent: string, targetLanguage: string) => {
+    if (!messageContent.trim() || targetLanguage === 'en') return;
+    
+    setTranslatingMessageIndex(messageIndex);
+    
+    try {
+      const result = await translate(messageContent, targetLanguage);
+      if (result && result.translatedText) {
+        setTranslatedMessages(prev => ({
+          ...prev,
+          [messageIndex]: { text: result.translatedText, language: targetLanguage }
+        }));
+      }
+    } catch (error) {
+      console.error('Translation failed:', error);
+      toast.error('Translation failed. Please try again.');
+    } finally {
+      setTranslatingMessageIndex(null);
+    }
+  };
+
+  const resetTranslation = (messageIndex: number) => {
+    setTranslatedMessages(prev => {
+      const newState = { ...prev };
+      delete newState[messageIndex];
+      return newState;
+    });
+  };
+
+
 
   useEffect(() => {
     if (params?.id) {
@@ -153,8 +261,8 @@ export default function NotebookDetailPage() {
         },
         body: JSON.stringify({
           message: userMessage,
-          notebookId: params?.id,
-          conversationHistory: conversations.slice(-10) // Last 10 messages for context
+          notebookId: params?.id
+          // No conversationHistory - each query starts with fresh context
         }),
       });
 
@@ -398,7 +506,10 @@ export default function NotebookDetailPage() {
             </h1>
           </div>
           
-          <h2 className="text-lg font-semibold text-gray-900 mb-3">Sources</h2>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-lg font-semibold text-gray-900">Sources</h2>
+
+          </div>
           
           {/* Add and Discover buttons */}
           <div className="flex gap-2 mb-4">
@@ -504,7 +615,56 @@ export default function NotebookDetailPage() {
                              ? 'bg-gradient-to-br from-red-50 to-red-100 text-red-800 border border-red-200 rounded-bl-md'
                              : 'bg-white text-gray-800 border border-gray-100 rounded-bl-md'
                        }`}>
-                        <div className="whitespace-pre-wrap leading-relaxed">{message.content}</div>
+                        <div className="whitespace-pre-wrap leading-relaxed">
+                          {translatedMessages[index] ? translatedMessages[index].text : message.content}
+                        </div>
+                        
+                        {/* Inline Language Dropdown for Assistant Messages */}
+                        {message.role === 'assistant' && !message.isError && (
+                          <div className="mt-2 flex items-center gap-2">
+                            <div className="relative">
+                              <select
+                                onChange={(e) => {
+                                  const targetLang = e.target.value;
+                                  if (targetLang === 'original') {
+                                    resetTranslation(index);
+                                  } else {
+                                    handleInlineTranslate(index, message.content, targetLang);
+                                  }
+                                }}
+                                value={translatedMessages[index]?.language || 'original'}
+                                disabled={translatingMessageIndex === index}
+                                className="text-xs bg-white border border-gray-200 rounded-md px-2 py-1 pr-6 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
+                              >
+                                <option value="original">Original</option>
+                                <option value="es">Spanish</option>
+                                <option value="fr">French</option>
+                                <option value="de">German</option>
+                                <option value="it">Italian</option>
+                                <option value="pt">Portuguese</option>
+                                <option value="ru">Russian</option>
+                                <option value="ja">Japanese</option>
+                                <option value="ko">Korean</option>
+                                <option value="zh">Chinese</option>
+                                <option value="ar">Arabic</option>
+                                <option value="hi">Hindi</option>
+                              </select>
+                              <ChevronDown className="absolute right-1 top-1/2 transform -translate-y-1/2 w-3 h-3 text-gray-400 pointer-events-none" />
+                            </div>
+                            {translatingMessageIndex === index && (
+                              <div className="flex items-center gap-1 text-xs text-gray-500">
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                                Translating...
+                              </div>
+                            )}
+                            {translatedMessages[index] && (
+                              <div className="text-xs text-green-600 flex items-center gap-1">
+                                <Languages className="w-3 h-3" />
+                                Translated
+                              </div>
+                            )}
+                          </div>
+                        )}
                         
                         {/* Sources */}
                         {message.sources && message.sources.length > 0 && (
@@ -520,12 +680,14 @@ export default function NotebookDetailPage() {
                             </div>
                           </div>
                         )}
+
                         
                         {/* Timestamp */}
                         <div className="text-xs opacity-60 mt-2">
                           {new Date(message.timestamp).toLocaleTimeString()}
                         </div>
                       </div>
+
                     </div>
                   </div>
                 ))}
@@ -558,14 +720,40 @@ export default function NotebookDetailPage() {
         {/* Fixed Chat Input */}
         <div className="bg-white/90 backdrop-blur-sm border-t border-gray-200/50 p-3 lg:p-4 sticky bottom-0">
           <div className="max-w-4xl mx-auto">
+            {/* Voice Input Indicator */}
+            {(isRecording || transcript) && (
+              <div className="mb-3">
+                <VoiceInputIndicator
+                  isRecording={isRecording}
+                  audioLevel={audioLevel}
+                  transcript={transcript}
+                  className="bg-white/95 backdrop-blur-sm rounded-xl p-3 border border-gray-200 shadow-sm"
+                />
+              </div>
+            )}
+            
+            {/* Voice Error Display */}
+            {voiceError && (
+              <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-xl">
+                <p className="text-sm text-red-600">{voiceError.message}</p>
+              </div>
+            )}
+            
+            {/* Translation Error Display */}
+            {translationError && (
+              <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-xl">
+                <p className="text-sm text-red-600">Translation error: {translationError?.message || 'Translation failed'}</p>
+              </div>
+            )}
+            
             <div className="flex items-start gap-3 lg:gap-4">
               <div className="flex-1 relative">
                 <div className="relative">
                   <textarea
                     value={chatMessage}
                     onChange={(e) => setChatMessage(e.target.value)}
-                    placeholder="Ask anything about your documents..."
-                    className="w-full px-4 py-3 pr-12 lg:px-5 lg:py-4 lg:pr-14 border border-gray-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none min-h-[48px] lg:min-h-[52px] max-h-32 bg-white/80 backdrop-blur-sm transition-all duration-200 shadow-sm hover:shadow-md text-sm lg:text-base leading-relaxed"
+                    placeholder={isRecording ? "Listening..." : "Ask anything about your documents..."}
+                    className="w-full px-4 py-3 pr-20 lg:px-5 lg:py-4 lg:pr-24 border border-gray-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none min-h-[48px] lg:min-h-[52px] max-h-32 bg-white/80 backdrop-blur-sm transition-all duration-200 shadow-sm hover:shadow-md text-sm lg:text-base leading-relaxed"
                     onKeyPress={(e) => {
                       if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();
@@ -573,18 +761,42 @@ export default function NotebookDetailPage() {
                       }
                     }}
                     rows={1}
+                    disabled={isRecording}
                   />
-                  <button className="absolute right-3 lg:right-4 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors">
-                    <Paperclip className="w-4 h-4 lg:w-5 lg:h-5" />
-                  </button>
+                  <div className="absolute right-3 lg:right-4 top-1/2 transform -translate-y-1/2 flex items-center gap-2">
+                    {/* Voice Input Button */}
+                     {isSupported && (
+                       <VoiceInputButton
+                         isRecording={isRecording}
+                         onClick={isRecording ? handleVoiceStop : handleVoiceStart}
+                         disabled={isLoadingChat}
+                         variant="compact"
+                       />
+                     )}
+                    <button className="text-gray-400 hover:text-gray-600 transition-colors">
+                      <Paperclip className="w-4 h-4 lg:w-5 lg:h-5" />
+                    </button>
+                  </div>
                 </div>
                 
-                {/* Source Counter */}
+                {/* Source Counter and Clear Context */}
                 <div className="flex items-center justify-between mt-2 px-1">
-                  <span className="text-xs text-gray-500 flex items-center gap-1">
-                    <span className="w-2 h-2 bg-green-400 rounded-full"></span>
-                    {selectedSourcesCount} source{selectedSourcesCount !== 1 ? 's' : ''} active
-                  </span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-gray-500 flex items-center gap-1">
+                      <span className="w-2 h-2 bg-green-400 rounded-full"></span>
+                      {selectedSourcesCount} source{selectedSourcesCount !== 1 ? 's' : ''} active
+                    </span>
+                    {conversations.length > 0 && (
+                      <button
+                        onClick={handleClearContext}
+                        className="text-xs text-blue-600 hover:text-blue-800 transition-colors flex items-center gap-1"
+                        title="Clear conversation context"
+                      >
+                        <X className="w-3 h-3" />
+                        Clear Context
+                      </button>
+                    )}
+                  </div>
                   <span className="text-xs text-gray-400 hidden sm:block">Press Enter to send, Shift+Enter for new line</span>
                 </div>
               </div>

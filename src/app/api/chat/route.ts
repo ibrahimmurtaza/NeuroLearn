@@ -18,13 +18,14 @@ interface ChatRequest {
   message: string;
   notebookId?: string;
   conversationHistory?: ChatMessage[];
+  selectedSourceIds?: string[];
 }
 
 export async function POST(request: NextRequest) {
   try {
     console.log('Chat API called');
-    const { message, notebookId, conversationHistory = [] }: ChatRequest = await request.json();
-    console.log('Request parsed:', { message, notebookId });
+    const { message, notebookId, conversationHistory = [], selectedSourceIds = [] }: ChatRequest = await request.json();
+    console.log('Request parsed:', { message, notebookId, selectedSourceIds });
 
     if (!message) {
       return NextResponse.json(
@@ -47,10 +48,10 @@ export async function POST(request: NextRequest) {
     let contextDocuments: any[] = [];
     let sources: string[] = [];
 
-    if (notebookId) {
-      console.log('Querying database for notebookId:', notebookId);
+    if (notebookId && selectedSourceIds.length > 0) {
+      console.log('Querying database for selected sources:', selectedSourceIds);
       
-      // Validate UUID format
+      // Validate UUID format for notebookId
       const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
       if (!uuidRegex.test(notebookId)) {
         console.log('Invalid UUID format for notebookId:', notebookId);
@@ -59,46 +60,50 @@ export async function POST(request: NextRequest) {
           { status: 400 }
         );
       }
+
+      // Validate selectedSourceIds are UUIDs
+      const invalidSourceIds = selectedSourceIds.filter(id => !uuidRegex.test(id));
+      if (invalidSourceIds.length > 0) {
+        console.log('Invalid UUID format for selectedSourceIds:', invalidSourceIds);
+        return NextResponse.json(
+          { error: 'Invalid source ID format' },
+          { status: 400 }
+        );
+      }
+
       try {
-        // First get the file IDs from notebook_files
-        const { data: notebookFiles, error: notebookError } = await supabase
-          .from('notebook_files')
-          .select('file_id')
-          .eq('notebook_id', notebookId);
+        // Directly get the selected files by their IDs
+        // Also verify they belong to the specified notebook for security
+        const { data: files, error: filesError } = await supabase
+          .from('files')
+          .select(`
+            id, 
+            filename, 
+            content,
+            notebook_files!inner(notebook_id)
+          `)
+          .in('id', selectedSourceIds)
+          .eq('notebook_files.notebook_id', notebookId);
 
-        console.log('Notebook files query result:', { notebookFiles, notebookError });
+        console.log('Selected files query result:', { files, filesError });
 
-        if (notebookError) {
-          console.error('Notebook files query error:', notebookError);
-          throw new Error(`Notebook files query failed: ${notebookError.message}`);
+        if (filesError) {
+          console.error('Selected files query error:', filesError);
+          throw new Error(`Selected files query failed: ${filesError.message}`);
         }
 
-        if (notebookFiles && notebookFiles.length > 0) {
-          const fileIds = notebookFiles.map(nf => nf.file_id);
-          console.log('File IDs:', fileIds);
-
-          // Then get the actual files
-          const { data: files, error: filesError } = await supabase
-            .from('files')
-            .select('id, filename, content')
-            .in('id', fileIds);
-
-          console.log('Files query result:', { files, filesError });
-
-          if (filesError) {
-            console.error('Files query error:', filesError);
-            throw new Error(`Files query failed: ${filesError.message}`);
-          }
-
-          if (files && files.length > 0) {
-            contextDocuments = files;
-            sources = files.map(doc => doc.filename);
-          }
+        if (files && files.length > 0) {
+          contextDocuments = files;
+          sources = files.map(doc => doc.filename);
         }
       } catch (dbError) {
         console.error('Database query exception:', dbError);
         throw dbError;
       }
+    } else if (notebookId && selectedSourceIds.length === 0) {
+      console.log('No sources selected - providing response without document context');
+      // When no sources are selected, we don't retrieve any documents
+      // This ensures the RAG system only uses selected documents
     }
 
     // Prepare context for RAG

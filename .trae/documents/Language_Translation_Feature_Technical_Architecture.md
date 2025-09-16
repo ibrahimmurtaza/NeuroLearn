@@ -34,48 +34,56 @@ graph TD
 
 ## 2. Technology Description
 
-- Frontend: React@18 + TypeScript + Tailwind CSS + Vite
-- Backend: Next.js API Routes + Google Translate API
-- Database: Supabase (PostgreSQL) for user preferences and translation cache
-- Caching: Browser localStorage + Supabase for persistent cache
-- Translation Service: Google Cloud Translation API v3
+* Frontend: React\@18 + TypeScript + Tailwind CSS + Vite
+
+* Backend: Next.js API Routes + Google Translate API
+
+* Database: Supabase (PostgreSQL) for user preferences and translation cache
+
+* Caching: Browser localStorage + Supabase for persistent cache
+
+* Translation Service: Google Cloud Translation API v3
 
 ## 3. Route Definitions
 
-| Route | Purpose |
-|-------|---------|
-| /notebooks/[id] | Main chat interface with integrated translation features |
-| /api/translate | Translation API endpoint for processing translation requests |
-| /api/languages | Endpoint to fetch supported languages list |
-| /api/user/preferences | User language preferences management |
+| Route                 | Purpose                                                      |
+| --------------------- | ------------------------------------------------------------ |
+| /notebooks/\[id]      | Main chat interface with integrated translation features     |
+| /api/translate        | Translation API endpoint for processing translation requests |
+| /api/languages        | Endpoint to fetch supported languages list                   |
+| /api/user/preferences | User language preferences management                         |
 
 ## 4. API Definitions
 
 ### 4.1 Core Translation API
 
 **Translation Request**
+
 ```
 POST /api/translate
 ```
 
 Request:
-| Param Name | Param Type | isRequired | Description |
-|------------|------------|------------|-------------|
-| text | string | true | The text content to translate |
-| targetLanguage | string | true | Target language code (ISO 639-1) |
-| sourceLanguage | string | false | Source language code (auto-detect if not provided) |
-| userId | string | false | User ID for caching and preferences |
+
+| Param Name     | Param Type | isRequired | Description                                        |
+| -------------- | ---------- | ---------- | -------------------------------------------------- |
+| text           | string     | true       | The text content to translate                      |
+| targetLanguage | string     | true       | Target language code (ISO 639-1)                   |
+| sourceLanguage | string     | false      | Source language code (auto-detect if not provided) |
+| userId         | string     | false      | User ID for caching and preferences                |
 
 Response:
-| Param Name | Param Type | Description |
-|------------|------------|-------------|
-| translatedText | string | The translated content |
-| sourceLanguage | string | Detected or provided source language |
-| targetLanguage | string | Target language code |
-| confidence | number | Translation confidence score (0-1) |
-| cached | boolean | Whether result was served from cache |
+
+| Param Name     | Param Type | Description                          |
+| -------------- | ---------- | ------------------------------------ |
+| translatedText | string     | The translated content               |
+| sourceLanguage | string     | Detected or provided source language |
+| targetLanguage | string     | Target language code                 |
+| confidence     | number     | Translation confidence score (0-1)   |
+| cached         | boolean    | Whether result was served from cache |
 
 Example Request:
+
 ```json
 {
   "text": "Machine learning is a subset of artificial intelligence.",
@@ -85,6 +93,7 @@ Example Request:
 ```
 
 Example Response:
+
 ```json
 {
   "translatedText": "El aprendizaje automático es un subconjunto de la inteligencia artificial.",
@@ -96,16 +105,19 @@ Example Response:
 ```
 
 **Supported Languages**
+
 ```
 GET /api/languages
 ```
 
 Response:
-| Param Name | Param Type | Description |
-|------------|------------|-------------|
-| languages | array | List of supported language objects |
+
+| Param Name | Param Type | Description                        |
+| ---------- | ---------- | ---------------------------------- |
+| languages  | array      | List of supported language objects |
 
 Example Response:
+
 ```json
 {
   "languages": [
@@ -126,17 +138,19 @@ Example Response:
 ```
 
 **User Preferences**
+
 ```
 POST /api/user/preferences
 ```
 
 Request:
-| Param Name | Param Type | isRequired | Description |
-|------------|------------|------------|-------------|
-| userId | string | true | User identifier |
-| defaultLanguage | string | true | Default target language code |
-| autoTranslate | boolean | true | Auto-translation preference |
-| displayMode | string | true | "side-by-side" or "toggle" |
+
+| Param Name      | Param Type | isRequired | Description                  |
+| --------------- | ---------- | ---------- | ---------------------------- |
+| userId          | string     | true       | User identifier              |
+| defaultLanguage | string     | true       | Default target language code |
+| autoTranslate   | boolean    | true       | Auto-translation preference  |
+| displayMode     | string     | true       | "side-by-side" or "toggle"   |
 
 ## 5. Server Architecture Diagram
 
@@ -222,6 +236,7 @@ erDiagram
 ### 6.2 Data Definition Language
 
 **User Preferences Table**
+
 ```sql
 -- Create user preferences table
 CREATE TABLE user_translation_preferences (
@@ -253,6 +268,7 @@ GRANT ALL PRIVILEGES ON user_translation_preferences TO authenticated;
 ```
 
 **Translation Cache Table**
+
 ```sql
 -- Create translation cache table
 CREATE TABLE translation_cache (
@@ -289,6 +305,7 @@ GRANT ALL PRIVILEGES ON translation_cache TO authenticated;
 ```
 
 **Supported Languages Table**
+
 ```sql
 -- Create supported languages table
 CREATE TABLE supported_languages (
@@ -330,25 +347,42 @@ GRANT SELECT ON supported_languages TO anon, authenticated;
 ## 7. Implementation Strategy
 
 ### 7.1 Phase 1: Core Translation
-- Set up Google Translate API integration
-- Create basic translation API endpoints
-- Implement language selector component
-- Add translation display in chat interface
+
+* Set up Google Translate API integration
+
+* Create basic translation API endpoints
+
+* Implement language selector component
+
+* Add translation display in chat interface
 
 ### 7.2 Phase 2: User Experience
-- Add user preferences system
-- Implement translation caching
-- Create auto-translation functionality
-- Add visual indicators and animations
+
+* Add user preferences system
+
+* Implement translation caching
+
+* Create auto-translation functionality
+
+* Add visual indicators and animations
 
 ### 7.3 Phase 3: Optimization
-- Implement advanced caching strategies
-- Add translation quality feedback
-- Optimize for mobile responsiveness
-- Add accessibility features
+
+* Implement advanced caching strategies
+
+* Add translation quality feedback
+
+* Optimize for mobile responsiveness
+
+* Add accessibility features
 
 ### 7.4 Security Considerations
-- API key management for Google Translate
-- Rate limiting for translation requests
-- Input sanitization for translation content
-- User data privacy
+
+* API key management for Google Translate
+
+* Rate limiting for translation requests
+
+* Input sanitization for translation content
+
+* User data privacy
+

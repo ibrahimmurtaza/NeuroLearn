@@ -6,6 +6,7 @@ import { Language, LanguageSelectorProps } from '@/types/translation';
 
 // Supported languages with their codes and names
 const SUPPORTED_LANGUAGES: Language[] = [
+  { code: 'original', name: 'Original', nativeName: 'Original' },
   { code: 'en', name: 'English', nativeName: 'English' },
   { code: 'es', name: 'Spanish', nativeName: 'Español' },
   { code: 'fr', name: 'French', nativeName: 'Français' },
@@ -75,6 +76,48 @@ const SUPPORTED_LANGUAGES: Language[] = [
   { code: 'sr', name: 'Serbian', nativeName: 'Српски' },
   { code: 'uk', name: 'Ukrainian', nativeName: 'Українська' },
   { code: 'uz', name: 'Uzbek', nativeName: 'Oʻzbekcha' },
+  // Additional languages from Microsoft Translator
+  { code: 'id', name: 'Indonesian', nativeName: 'Bahasa Indonesia' },
+  { code: 'ms', name: 'Malay', nativeName: 'Bahasa Melayu' },
+  { code: 'tl', name: 'Filipino', nativeName: 'Filipino' },
+  { code: 'el', name: 'Greek', nativeName: 'Ελληνικά' },
+  { code: 'kk', name: 'Kazakh', nativeName: 'Қазақ тілі' },
+  { code: 'ky', name: 'Kyrgyz', nativeName: 'Кыргызча' },
+  { code: 'az', name: 'Azerbaijani', nativeName: 'Azərbaycan dili' },
+  { code: 'hy', name: 'Armenian', nativeName: 'Հայերեն' },
+  { code: 'ps', name: 'Pashto', nativeName: 'پښتو' },
+  { code: 'sd', name: 'Sindhi', nativeName: 'سنڌي' },
+  { code: 'ku', name: 'Kurdish', nativeName: 'Kurdî' },
+  { code: 'ckb', name: 'Kurdish (Sorani)', nativeName: 'کوردی' },
+  { code: 'ig', name: 'Igbo', nativeName: 'Igbo' },
+  { code: 'yo', name: 'Yoruba', nativeName: 'Yorùbá' },
+  { code: 'ha', name: 'Hausa', nativeName: 'Hausa' },
+  { code: 'rw', name: 'Kinyarwanda', nativeName: 'Ikinyarwanda' },
+  { code: 'mg', name: 'Malagasy', nativeName: 'Malagasy' },
+  { code: 'ny', name: 'Chichewa', nativeName: 'Chichewa' },
+  { code: 'sn', name: 'Shona', nativeName: 'chiShona' },
+  { code: 'so', name: 'Somali', nativeName: 'Soomaali' },
+  { code: 'xh', name: 'Xhosa', nativeName: 'isiXhosa' },
+  { code: 'st', name: 'Sesotho', nativeName: 'Sesotho' },
+  { code: 'tn', name: 'Setswana', nativeName: 'Setswana' },
+  { code: 'ts', name: 'Tsonga', nativeName: 'Xitsonga' },
+  { code: 've', name: 'Venda', nativeName: 'Tshivenḓa' },
+  { code: 'ss', name: 'Swati', nativeName: 'SiSwati' },
+  { code: 'nr', name: 'Ndebele', nativeName: 'isiNdebele' },
+  { code: 'as', name: 'Assamese', nativeName: 'অসমীয়া' },
+  { code: 'or', name: 'Odia', nativeName: 'ଓଡ଼ିଆ' },
+  { code: 'mai', name: 'Maithili', nativeName: 'मैथिली' },
+  { code: 'bho', name: 'Bhojpuri', nativeName: 'भोजपुरी' },
+  { code: 'gom', name: 'Konkani', nativeName: 'कोंकणी' },
+  { code: 'sa', name: 'Sanskrit', nativeName: 'संस्कृतम्' },
+  { code: 'dv', name: 'Dhivehi', nativeName: 'ދިވެހި' },
+  { code: 'mni', name: 'Manipuri', nativeName: 'মৈতৈলোন্' },
+  { code: 'brx', name: 'Bodo', nativeName: 'बर\'' },
+  { code: 'doi', name: 'Dogri', nativeName: 'डोगरी' },
+  { code: 'ks', name: 'Kashmiri', nativeName: 'کٲشُر' },
+  { code: 'sat', name: 'Santali', nativeName: 'ᱥᱟᱱᱛᱟᱲᱤ' },
+  { code: 'lus', name: 'Mizo', nativeName: 'Mizo ṭawng' },
+  { code: 'mni-Mtei', name: 'Meiteilon (Manipuri)', nativeName: 'ꯃꯩꯇꯩꯂꯣꯟ' },
 ];
 
 const LanguageSelector: React.FC<LanguageSelectorProps> = ({
@@ -87,8 +130,11 @@ const LanguageSelector: React.FC<LanguageSelectorProps> = ({
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [focusedIndex, setFocusedIndex] = useState(-1);
+  const [isTouchDevice, setIsTouchDevice] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
 
   // Filter languages based on search term
   const filteredLanguages = SUPPORTED_LANGUAGES.filter((language) => {
@@ -105,12 +151,49 @@ const LanguageSelector: React.FC<LanguageSelectorProps> = ({
     (lang) => lang.code === selectedLanguage
   );
 
+  // Detect touch device
+  useEffect(() => {
+    const checkTouchDevice = () => {
+      setIsTouchDevice('ontouchstart' in window || navigator.maxTouchPoints > 0);
+    };
+    
+    checkTouchDevice();
+    window.addEventListener('resize', checkTouchDevice);
+    
+    return () => {
+      window.removeEventListener('resize', checkTouchDevice);
+    };
+  }, []);
+
+  // Scroll to focused item with optimized performance for mobile
+  const scrollToFocusedItem = (index: number) => {
+    if (listRef.current && index >= 0 && index < filteredLanguages.length) {
+      const listElement = listRef.current;
+      const itemHeight = 56; // Approximate height of each language item
+      const scrollTop = index * itemHeight;
+      const containerHeight = listElement.clientHeight;
+      const currentScrollTop = listElement.scrollTop;
+
+      // Only scroll if the item is not fully visible
+      if (scrollTop < currentScrollTop || scrollTop + itemHeight > currentScrollTop + containerHeight) {
+        // Use requestAnimationFrame for better performance on mobile
+        requestAnimationFrame(() => {
+          listElement.scrollTo({
+            top: Math.max(0, scrollTop - containerHeight / 2 + itemHeight / 2),
+            behavior: isTouchDevice ? 'auto' : 'smooth' // Disable smooth scrolling on touch devices for better performance
+          });
+        });
+      }
+    }
+  };
+
   // Handle click outside to close dropdown
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setIsOpen(false);
         setSearchTerm('');
+        setFocusedIndex(-1);
       }
     };
 
@@ -123,20 +206,35 @@ const LanguageSelector: React.FC<LanguageSelectorProps> = ({
   // Focus search input when dropdown opens
   useEffect(() => {
     if (isOpen && searchInputRef.current) {
-      searchInputRef.current.focus();
+      // Delay focus on mobile to prevent keyboard issues
+      if (isTouchDevice) {
+        setTimeout(() => {
+          searchInputRef.current?.focus();
+        }, 100);
+      } else {
+        searchInputRef.current.focus();
+      }
+      setFocusedIndex(-1);
     }
-  }, [isOpen]);
+  }, [isOpen, isTouchDevice]);
+
+  // Reset focused index when filtered languages change
+  useEffect(() => {
+    setFocusedIndex(-1);
+  }, [filteredLanguages.length]);
 
   const handleLanguageSelect = (language: Language) => {
     onLanguageChange(language.code);
     setIsOpen(false);
     setSearchTerm('');
+    setFocusedIndex(-1);
   };
 
   const handleToggleDropdown = () => {
     if (!disabled) {
       setIsOpen(!isOpen);
       setSearchTerm('');
+      setFocusedIndex(-1);
     }
   };
 
@@ -144,6 +242,37 @@ const LanguageSelector: React.FC<LanguageSelectorProps> = ({
     if (event.key === 'Escape') {
       setIsOpen(false);
       setSearchTerm('');
+      setFocusedIndex(-1);
+    } else if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      const nextIndex = Math.min(focusedIndex + 1, filteredLanguages.length - 1);
+      setFocusedIndex(nextIndex);
+      scrollToFocusedItem(nextIndex);
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      const prevIndex = Math.max(focusedIndex - 1, 0);
+      setFocusedIndex(prevIndex);
+      scrollToFocusedItem(prevIndex);
+    } else if (event.key === 'Enter' && focusedIndex >= 0) {
+      event.preventDefault();
+      handleLanguageSelect(filteredLanguages[focusedIndex]);
+    } else if (event.key === 'Home') {
+      event.preventDefault();
+      setFocusedIndex(0);
+      scrollToFocusedItem(0);
+    } else if (event.key === 'End') {
+      event.preventDefault();
+      const lastIndex = filteredLanguages.length - 1;
+      setFocusedIndex(lastIndex);
+      scrollToFocusedItem(lastIndex);
+    }
+  };
+
+  // Handle touch interactions
+  const handleTouchStart = (event: React.TouchEvent) => {
+    // Prevent default to avoid unwanted behaviors on mobile
+    if (event.target !== searchInputRef.current) {
+      event.preventDefault();
     }
   };
 
@@ -190,9 +319,13 @@ const LanguageSelector: React.FC<LanguageSelectorProps> = ({
 
       {/* Dropdown Menu */}
       {isOpen && (
-        <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-80 overflow-hidden">
+        <div 
+          className="absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-md shadow-lg flex flex-col"
+          onTouchStart={handleTouchStart}
+          style={{ maxHeight: '400px' }}
+        >
           {/* Search Input */}
-          <div className="p-2 border-b border-gray-200">
+          <div className="p-2 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
               <input
@@ -202,32 +335,84 @@ const LanguageSelector: React.FC<LanguageSelectorProps> = ({
                 onChange={(e) => setSearchTerm(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder="Search languages..."
-                className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck="false"
               />
             </div>
           </div>
 
           {/* Language List */}
-          <div className="max-h-60 overflow-y-auto">
+          <div 
+            ref={listRef}
+            className="flex-1 overflow-y-auto"
+            style={{ 
+              maxHeight: '320px',
+              minHeight: '200px'
+            }}
+          >
+            <style jsx>{`
+              .scrollbar-smooth::-webkit-scrollbar {
+                width: ${isTouchDevice ? '12px' : '8px'};
+              }
+              .scrollbar-smooth::-webkit-scrollbar-track {
+                background: #f1f5f9;
+                border-radius: 4px;
+              }
+              .scrollbar-smooth::-webkit-scrollbar-thumb {
+                background: ${isTouchDevice ? '#94a3b8' : '#cbd5e1'};
+                border-radius: 4px;
+                transition: background-color 0.2s ease;
+              }
+              .scrollbar-smooth::-webkit-scrollbar-thumb:hover {
+                background: #94a3b8;
+              }
+              .scrollbar-smooth::-webkit-scrollbar-thumb:active {
+                background: #64748b;
+              }
+              @media (max-width: 768px) {
+                .scrollbar-smooth::-webkit-scrollbar {
+                  width: 14px;
+                }
+                .scrollbar-smooth::-webkit-scrollbar-thumb {
+                  background: #94a3b8;
+                  min-height: 40px;
+                }
+              }
+            `}</style>
             {filteredLanguages.length > 0 ? (
-              filteredLanguages.map((language) => (
+              filteredLanguages.map((language, index) => (
                 <button
                   key={language.code}
                   type="button"
                   onClick={() => handleLanguageSelect(language)}
+                  onMouseEnter={() => !isTouchDevice && setFocusedIndex(index)}
                   className={`
                     w-full px-3 py-2 text-left text-sm hover:bg-gray-100
                     focus:outline-none focus:bg-gray-100
                     flex items-center justify-between
-                    transition-colors duration-150
+                    transition-all duration-200 ease-in-out
+                    ${isTouchDevice ? '' : 'transform hover:scale-[1.02] active:scale-[0.98]'}
                     ${
                       selectedLanguage === language.code
-                        ? 'bg-blue-50 text-blue-700'
+                        ? 'bg-blue-50 text-blue-700 border-l-2 border-blue-500'
                         : 'text-gray-900'
+                    }
+                    ${
+                      focusedIndex === index && !isTouchDevice
+                        ? 'bg-gray-100 ring-2 ring-blue-300 ring-inset'
+                        : ''
                     }
                   `}
                   role="option"
                   aria-selected={selectedLanguage === language.code}
+                  tabIndex={-1}
+                  style={{
+                    minHeight: isTouchDevice ? '48px' : '40px', // Larger touch targets on mobile
+                    touchAction: 'manipulation' // Optimize touch interactions
+                  }}
                 >
                   <div className="flex flex-col">
                     <span className="font-medium">{language.name}</span>

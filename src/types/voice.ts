@@ -16,11 +16,30 @@ export interface VoiceError {
   message: string;
 }
 
+export type TranscriptionMethod = 'web-speech' | 'whisper' | 'hybrid';
+
+export interface TranscriptionResult {
+  text: string;
+  language?: string;
+  confidence?: number;
+  duration?: number;
+  method: TranscriptionMethod;
+  // Whisper-specific properties
+  segments?: any[];
+  words?: any[];
+}
+
 export interface UseVoiceRecognitionOptions {
   continuous?: boolean;
   interimResults?: boolean;
   language?: string;
+  transcriptionMethod?: TranscriptionMethod;
+  useWhisper?: boolean;
+  autoDetectLanguage?: boolean;
+  translateToEnglish?: boolean;
+  fallbackToWebSpeech?: boolean;
   onTranscript?: (text: string) => void;
+  onTranscriptionResult?: (result: TranscriptionResult) => void;
   onError?: (error: VoiceError) => void;
   onStart?: () => void;
   onEnd?: () => void;
@@ -33,10 +52,14 @@ export interface UseVoiceRecognitionReturn {
   interimTranscript: string;
   error: VoiceError | null;
   audioLevel: number;
+  transcriptionMethod: TranscriptionMethod;
+  detectedLanguage?: string;
+  isProcessing: boolean;
   startRecording: () => void;
   stopRecording: () => void;
   resetTranscript: () => void;
   clearError: () => void;
+  setTranscriptionMethod: (method: TranscriptionMethod) => void;
 }
 
 export interface VoiceInputButtonProps {

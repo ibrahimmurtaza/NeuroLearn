@@ -178,24 +178,79 @@ export const VoiceInputIndicator: React.FC<{
   isRecording: boolean;
   audioLevel: number;
   transcript?: string;
+  transcriptionMethod?: 'web-speech' | 'whisper' | 'hybrid';
+  detectedLanguage?: string;
+  confidence?: number;
+  isProcessing?: boolean;
   className?: string;
-}> = ({ isRecording, audioLevel, transcript, className }) => {
-  if (!isRecording && !transcript) {
+}> = ({ 
+  isRecording, 
+  audioLevel, 
+  transcript, 
+  transcriptionMethod = 'web-speech',
+  detectedLanguage,
+  confidence,
+  isProcessing = false,
+  className 
+}) => {
+  if (!isRecording && !transcript && !isProcessing) {
     return null;
   }
 
+  const getMethodLabel = (method: string) => {
+    switch (method) {
+      case 'web-speech': return 'Web Speech';
+      case 'whisper': return 'Whisper AI';
+      case 'hybrid': return 'Hybrid Mode';
+      default: return 'Voice Input';
+    }
+  };
+
+  const getMethodColor = (method: string) => {
+    switch (method) {
+      case 'web-speech': return 'text-blue-600';
+      case 'whisper': return 'text-green-600';
+      case 'hybrid': return 'text-purple-600';
+      default: return 'text-gray-600';
+    }
+  };
+
   return (
     <div className={cn('flex flex-col gap-2', className)}>
-      {/* Recording status */}
-      {isRecording && (
+      {/* Recording status with method indicator */}
+      {(isRecording || isProcessing) && (
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2 text-sm text-red-600">
-            <CircularAudioVisualization 
-              audioLevel={audioLevel} 
-              isRecording={isRecording} 
-            />
-            <span className="font-medium">Listening...</span>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 text-sm">
+              <CircularAudioVisualization 
+                audioLevel={audioLevel} 
+                isRecording={isRecording} 
+              />
+              <div className="flex flex-col">
+                <span className={cn('font-medium', isRecording ? 'text-red-600' : 'text-orange-600')}>
+                  {isRecording ? 'Listening...' : isProcessing ? 'Processing...' : 'Ready'}
+                </span>
+                <span className={cn('text-xs', getMethodColor(transcriptionMethod))}>
+                  {getMethodLabel(transcriptionMethod)}
+                </span>
+              </div>
+            </div>
+            
+            {/* Language detection indicator */}
+            {detectedLanguage && (
+              <div className="flex items-center gap-1 px-2 py-1 bg-blue-50 rounded-full text-xs">
+                <span className="text-blue-700 font-medium">
+                  {detectedLanguage.split('-')[0].toUpperCase()}
+                </span>
+                {confidence && (
+                  <span className="text-blue-600">
+                    ({Math.round(confidence * 100)}%)
+                  </span>
+                )}
+              </div>
+            )}
           </div>
+          
           <WaveformAudioVisualization 
             audioLevel={audioLevel} 
             isRecording={isRecording} 
@@ -205,8 +260,13 @@ export const VoiceInputIndicator: React.FC<{
       
       {/* Transcript preview */}
       {transcript && (
-        <div className="text-sm text-gray-600 italic bg-gray-50 rounded-lg p-2">
-          "{transcript}"
+        <div className="text-sm text-gray-600 italic bg-gray-50 rounded-lg p-2 border-l-4 border-blue-200">
+          <div className="flex items-start gap-2">
+            <span className="text-blue-600 font-medium text-xs uppercase tracking-wide">
+              Transcript:
+            </span>
+            <span>"{transcript}"</span>
+          </div>
         </div>
       )}
     </div>

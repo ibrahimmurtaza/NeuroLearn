@@ -3,10 +3,13 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { ArrowLeft, Plus, Search, Send, Paperclip, Upload, X, FileText, Loader2, Trash2, Languages, ChevronDown } from 'lucide-react';
+import LanguageSelector from '@/components/LanguageSelector';
 import { supabase } from '@/lib/supabase';
-import { useVoiceRecognition } from '@/hooks/useVoiceRecognition';
+import { useVoiceRecognitionEnhanced } from '@/hooks/useVoiceRecognitionEnhanced';
 import { VoiceInputButton } from '@/components/VoiceInputButton';
 import { VoiceInputIndicator } from '@/components/AudioVisualization';
+import { TranscriptionMethodSelector } from '@/components/TranscriptionMethodSelector';
+import { LanguageDetectionIndicator } from '@/components/LanguageDetectionIndicator';
 import useTranslation from '@/hooks/useTranslation';
 
 import { toast } from 'sonner';
@@ -49,6 +52,7 @@ export default function NotebookDetailPage() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [translatedMessages, setTranslatedMessages] = useState<{[key: number]: {text: string, language: string}}>({});
   const [translatingMessageIndex, setTranslatingMessageIndex] = useState<number | null>(null);
+  const [translateToEnglish, setTranslateToEnglish] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -64,20 +68,35 @@ export default function NotebookDetailPage() {
     clearTranslation
   } = useTranslation();
 
-  // Voice recognition functionality
+  // Voice recognition functionality with Whisper support
   const {
     isRecording,
     transcript,
     audioLevel,
     error: voiceError,
     isSupported,
+    transcriptionMethod,
+    detectedLanguage,
+    isProcessing,
     startRecording,
     stopRecording,
-    resetTranscript
-  } = useVoiceRecognition({
+    resetTranscript,
+    setTranscriptionMethod
+  } = useVoiceRecognitionEnhanced({
     continuous: true,
     interimResults: true,
-    language: 'en-US'
+    language: 'en-US',
+    transcriptionMethod: 'hybrid',
+    useWhisper: true,
+    autoDetectLanguage: true,
+    translateToEnglish: translateToEnglish,
+    fallbackToWebSpeech: true,
+    onTranscriptionResult: (result) => {
+      console.log('Transcription result:', result);
+      if (result.detectedLanguage) {
+        console.log('Detected language:', result.detectedLanguage);
+      }
+    }
   });
 
   // Handle voice input completion
@@ -114,9 +133,37 @@ export default function NotebookDetailPage() {
     stopRecording();
   };
 
-  const handleClearContext = () => {
-    setConversations([]);
-    toast.success('Conversation context cleared');
+  const handleClearContext = async () => {
+    try {
+      console.log('Attempting to clear conversations for notebook:', params?.id);
+      
+      // Use API endpoint to delete conversations with proper permissions
+      const response = await fetch('/api/conversations/clear', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ notebook_id: params?.id }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('Error deleting conversations:', errorData);
+        toast.error(`Failed to clear chat history: ${errorData.error || 'Unknown error'}`);
+        return;
+      }
+
+      const result = await response.json();
+      console.log('Successfully deleted conversations:', result);
+      
+      // Clear local state
+      setConversations([]);
+      
+      toast.success(`Successfully cleared ${result.deletedCount || 0} messages from chat history`);
+    } catch (error) {
+      console.error('Error clearing conversations:', error);
+      toast.error('Failed to clear chat history');
+    }
   };
 
   // Inline translation handler
@@ -155,6 +202,7 @@ export default function NotebookDetailPage() {
     if (params?.id) {
       fetchNotebook();
       fetchSources();
+      fetchConversations();
     }
   }, [params?.id]);
 
@@ -216,6 +264,32 @@ export default function NotebookDetailPage() {
     }
   };
 
+  const fetchConversations = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('conversations')
+        .select('*')
+        .eq('notebook_id', params?.id)
+        .order('created_at', { ascending: true });
+
+      if (error) {
+        console.error('Error fetching conversations:', error);
+        return;
+      }
+
+      const formattedConversations = data?.map((conv: any) => ({
+        role: conv.role,
+        content: conv.message,
+        timestamp: conv.created_at,
+        sources: conv.sources || []
+      })) || [];
+
+      setConversations(formattedConversations);
+    } catch (error) {
+      console.error('Error:', error);
+    }
+  };
+
   const handleSelectAllSources = () => {
     const newSelectAll = !selectAllSources;
     setSelectAllSources(newSelectAll);
@@ -252,6 +326,7 @@ export default function NotebookDetailPage() {
     try {
       // Get selected sources
       const selectedSources = sources.filter(source => source.selected);
+      const selectedSourceIds = selectedSources.map(source => source.id);
       
       // Send message to chat API
       const response = await fetch('/api/chat', {
@@ -261,7 +336,8 @@ export default function NotebookDetailPage() {
         },
         body: JSON.stringify({
           message: userMessage,
-          notebookId: params?.id
+          notebookId: params?.id,
+          selectedSourceIds: selectedSourceIds
           // No conversationHistory - each query starts with fresh context
         }),
       });
@@ -591,6 +667,18 @@ export default function NotebookDetailPage() {
               </div>
             ) : (
               <div className="space-y-6 pb-4">
+                {/* Conversation Header */}
+                <div className="flex items-center justify-between mb-4 pb-2 border-b border-gray-200">
+                  <div className="flex items-center gap-2 text-sm text-gray-600">
+                    <span className="font-medium">Chat History</span>
+                    <span className="bg-gray-100 px-2 py-1 rounded-full text-xs">
+                      {conversations.length} message{conversations.length !== 1 ? 's' : ''}
+                    </span>
+                  </div>
+                  <div className="text-xs text-gray-500">
+                    Scroll to see all messages
+                  </div>
+                </div>
                 {conversations.map((message, index) => (
                   <div key={index} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'} animate-fadeIn`}>
                     <div className={`max-w-xs sm:max-w-md lg:max-w-3xl group ${
@@ -619,37 +707,38 @@ export default function NotebookDetailPage() {
                           {translatedMessages[index] ? translatedMessages[index].text : message.content}
                         </div>
                         
+                        {/* Timestamp */}
+                        {message.timestamp && (
+                          <div className={`text-xs mt-2 opacity-70 ${
+                            message.role === 'user' ? 'text-white/80' : 'text-gray-500'
+                          }`}>
+                            {new Date(message.timestamp).toLocaleString('en-US', {
+                              month: 'short',
+                              day: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                              hour12: true
+                            })}
+                          </div>
+                        )}
+                        
                         {/* Inline Language Dropdown for Assistant Messages */}
                         {message.role === 'assistant' && !message.isError && (
                           <div className="mt-2 flex items-center gap-2">
                             <div className="relative">
-                              <select
-                                onChange={(e) => {
-                                  const targetLang = e.target.value;
-                                  if (targetLang === 'original') {
+                              <LanguageSelector
+                                selectedLanguage={translatedMessages[index]?.language || 'original'}
+                                onLanguageChange={(languageCode) => {
+                                  if (languageCode === 'original') {
                                     resetTranslation(index);
                                   } else {
-                                    handleInlineTranslate(index, message.content, targetLang);
+                                    handleInlineTranslate(index, message.content, languageCode);
                                   }
                                 }}
-                                value={translatedMessages[index]?.language || 'original'}
+                                placeholder="Original"
                                 disabled={translatingMessageIndex === index}
-                                className="text-xs bg-white border border-gray-200 rounded-md px-2 py-1 pr-6 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
-                              >
-                                <option value="original">Original</option>
-                                <option value="es">Spanish</option>
-                                <option value="fr">French</option>
-                                <option value="de">German</option>
-                                <option value="it">Italian</option>
-                                <option value="pt">Portuguese</option>
-                                <option value="ru">Russian</option>
-                                <option value="ja">Japanese</option>
-                                <option value="ko">Korean</option>
-                                <option value="zh">Chinese</option>
-                                <option value="ar">Arabic</option>
-                                <option value="hi">Hindi</option>
-                              </select>
-                              <ChevronDown className="absolute right-1 top-1/2 transform -translate-y-1/2 w-3 h-3 text-gray-400 pointer-events-none" />
+                                className="text-xs min-w-[120px]"
+                              />
                             </div>
                             {translatingMessageIndex === index && (
                               <div className="flex items-center gap-1 text-xs text-gray-500">
@@ -721,12 +810,15 @@ export default function NotebookDetailPage() {
         <div className="bg-white/90 backdrop-blur-sm border-t border-gray-200/50 p-3 lg:p-4 sticky bottom-0">
           <div className="max-w-4xl mx-auto">
             {/* Voice Input Indicator */}
-            {(isRecording || transcript) && (
+            {(isRecording || transcript || isProcessing) && (
               <div className="mb-3">
                 <VoiceInputIndicator
                   isRecording={isRecording}
                   audioLevel={audioLevel}
                   transcript={transcript}
+                  transcriptionMethod={transcriptionMethod}
+                  detectedLanguage={detectedLanguage}
+                  isProcessing={isProcessing}
                   className="bg-white/95 backdrop-blur-sm rounded-xl p-3 border border-gray-200 shadow-sm"
                 />
               </div>
@@ -786,14 +878,40 @@ export default function NotebookDetailPage() {
                       <span className="w-2 h-2 bg-green-400 rounded-full"></span>
                       {selectedSourcesCount} source{selectedSourcesCount !== 1 ? 's' : ''} active
                     </span>
+                    
+                    {/* Transcription Method Selector */}
+                    {isSupported && (
+                      <TranscriptionMethodSelector
+                        currentMethod={transcriptionMethod}
+                        onMethodChange={setTranscriptionMethod}
+                        disabled={isRecording || isLoadingChat}
+                        showLabels={false}
+                      />
+                    )}
+                    
+                    {/* Translation Toggle */}
+                    {isSupported && (transcriptionMethod === 'whisper' || transcriptionMethod === 'hybrid') && (
+                      <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={translateToEnglish}
+                          onChange={(e) => setTranslateToEnglish(e.target.checked)}
+                          disabled={isRecording || isLoadingChat}
+                          className="w-3 h-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                        />
+                        <Languages className="w-3 h-3" />
+                        <span>Translate to English</span>
+                      </label>
+                    )}
+                    
                     {conversations.length > 0 && (
                       <button
                         onClick={handleClearContext}
-                        className="text-xs text-blue-600 hover:text-blue-800 transition-colors flex items-center gap-1"
-                        title="Clear conversation context"
+                        className="text-xs text-red-600 hover:text-red-800 transition-colors flex items-center gap-1 bg-red-50 hover:bg-red-100 px-2 py-1 rounded-md border border-red-200"
+                        title="Clear entire chat history"
                       >
-                        <X className="w-3 h-3" />
-                        Clear Context
+                        <Trash2 className="w-3 h-3" />
+                        Clear Chat History
                       </button>
                     )}
                   </div>

@@ -1,0 +1,7 @@
+This is a test text file.
+
+It contains multiple lines
+and some formatting.
+
+
+Extra spaces   and   tabs		here.

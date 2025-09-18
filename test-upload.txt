@@ -1,0 +1,9 @@
+This is a test document for verifying the document upload functionality.
+
+Content:
+- Test document upload
+- Verify document display
+- Check document operations
+- Test batch summarization
+
+This document should appear in the document library after upload.

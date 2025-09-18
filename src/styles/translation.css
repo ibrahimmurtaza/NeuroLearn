@@ -1,0 +1,315 @@
+/* Translation Feature Styles */
+
+/* Translation Panel Animations */
+.translation-panel {
+  @apply transition-all duration-300 ease-in-out;
+}
+
+.translation-panel.entering {
+  @apply opacity-0 transform translate-y-2;
+}
+
+.translation-panel.entered {
+  @apply opacity-100 transform translate-y-0;
+}
+
+.translation-panel.exiting {
+  @apply opacity-0 transform translate-y-2;
+}
+
+/* Language Selector Dropdown Animation */
+.language-dropdown {
+  @apply transition-all duration-200 ease-out;
+  transform-origin: top;
+}
+
+.language-dropdown.entering {
+  @apply opacity-0 scale-95;
+}
+
+.language-dropdown.entered {
+  @apply opacity-100 scale-100;
+}
+
+.language-dropdown.exiting {
+  @apply opacity-0 scale-95;
+}
+
+/* Translation Loading States */
+.translation-loading {
+  @apply relative overflow-hidden;
+}
+
+.translation-loading::before {
+  content: '';
+  @apply absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent;
+  animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* Confidence Indicators */
+.confidence-high {
+  @apply bg-green-100 text-green-800 border-green-200;
+}
+
+.confidence-medium {
+  @apply bg-yellow-100 text-yellow-800 border-yellow-200;
+}
+
+.confidence-low {
+  @apply bg-red-100 text-red-800 border-red-200;
+}
+
+.confidence-bar {
+  @apply h-1 rounded-full transition-all duration-300;
+}
+
+.confidence-bar.high {
+  @apply bg-green-500;
+  width: 100%;
+}
+
+.confidence-bar.medium {
+  @apply bg-yellow-500;
+  width: 70%;
+}
+
+.confidence-bar.low {
+  @apply bg-red-500;
+  width: 40%;
+}
+
+/* Translation Mode Indicators */
+.translation-mode-indicator {
+  @apply inline-flex items-center px-2 py-1 text-xs font-medium rounded-full;
+}
+
+.translation-mode-side-by-side {
+  @apply bg-blue-100 text-blue-800;
+}
+
+.translation-mode-stacked {
+  @apply bg-purple-100 text-purple-800;
+}
+
+.translation-mode-translation-only {
+  @apply bg-green-100 text-green-800;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .translation-panel-side-by-side {
+    @apply flex-col space-x-0 space-y-4;
+  }
+  
+  .translation-controls {
+    @apply fixed bottom-0 left-0 right-0 z-50 bg-white border-t shadow-lg;
+  }
+  
+  .language-selector-mobile {
+    @apply w-full;
+  }
+}
+
+@media (max-width: 640px) {
+  .translation-panel {
+    @apply text-sm;
+  }
+  
+  .translation-controls {
+    @apply p-2;
+  }
+  
+  .language-dropdown {
+    @apply max-h-48;
+  }
+}
+
+/* Dark Mode Support */
+@media (prefers-color-scheme: dark) {
+  .translation-panel {
+    @apply bg-gray-800 border-gray-700;
+  }
+  
+  .translation-controls {
+    @apply bg-gray-800 border-gray-700;
+  }
+  
+  .language-dropdown {
+    @apply bg-gray-800 border-gray-700;
+  }
+  
+  .confidence-high {
+    @apply bg-green-900/30 text-green-300 border-green-700;
+  }
+  
+  .confidence-medium {
+    @apply bg-yellow-900/30 text-yellow-300 border-yellow-700;
+  }
+  
+  .confidence-low {
+    @apply bg-red-900/30 text-red-300 border-red-700;
+  }
+}
+
+/* Focus States for Accessibility */
+.translation-button:focus {
+  @apply outline-none ring-2 ring-blue-500 ring-offset-2;
+}
+
+.language-option:focus {
+  @apply outline-none bg-blue-50 text-blue-900;
+}
+
+@media (prefers-color-scheme: dark) {
+  .language-option:focus {
+    @apply bg-blue-900/30 text-blue-300;
+  }
+}
+
+/* Translation Status Indicators */
+.translation-status {
+  @apply inline-flex items-center gap-1 text-xs;
+}
+
+.translation-status.translating {
+  @apply text-blue-600;
+}
+
+.translation-status.completed {
+  @apply text-green-600;
+}
+
+.translation-status.error {
+  @apply text-red-600;
+}
+
+.translation-status.cached {
+  @apply text-gray-500;
+}
+
+/* Pulse Animation for Active Translation */
+.translation-active {
+  animation: pulse-blue 2s infinite;
+}
+
+@keyframes pulse-blue {
+  0%, 100% {
+    @apply bg-blue-50;
+  }
+  50% {
+    @apply bg-blue-100;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  @keyframes pulse-blue {
+    0%, 100% {
+      @apply bg-blue-900/20;
+    }
+    50% {
+      @apply bg-blue-900/40;
+    }
+  }
+}
+
+/* Copy Button Styles */
+.copy-button {
+  @apply opacity-0 group-hover:opacity-100 transition-opacity duration-200;
+}
+
+.copy-button.copied {
+  @apply opacity-100 text-green-600;
+}
+
+/* Language Flag Styles */
+.language-flag {
+  @apply text-lg leading-none;
+  font-family: 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif;
+}
+
+/* Smooth Transitions */
+.translation-element {
+  @apply transition-all duration-200 ease-in-out;
+}
+
+/* Error States */
+.translation-error {
+  @apply border-red-200 bg-red-50 text-red-800;
+}
+
+@media (prefers-color-scheme: dark) {
+  .translation-error {
+    @apply border-red-800 bg-red-900/20 text-red-300;
+  }
+}
+
+/* Loading Skeleton */
+.translation-skeleton {
+  @apply animate-pulse bg-gray-200 rounded;
+}
+
+@media (prefers-color-scheme: dark) {
+  .translation-skeleton {
+    @apply bg-gray-700;
+  }
+}
+
+/* Tooltip Styles */
+.translation-tooltip {
+  @apply absolute z-50 px-2 py-1 text-xs text-white bg-gray-900 rounded shadow-lg;
+  @apply opacity-0 pointer-events-none transition-opacity duration-200;
+}
+
+.translation-tooltip.visible {
+  @apply opacity-100 pointer-events-auto;
+}
+
+/* High Contrast Mode */
+@media (prefers-contrast: high) {
+  .translation-panel {
+    @apply border-2 border-black;
+  }
+  
+  .translation-button {
+    @apply border-2 border-black;
+  }
+  
+  .confidence-high {
+    @apply bg-green-200 text-black border-2 border-green-800;
+  }
+  
+  .confidence-medium {
+    @apply bg-yellow-200 text-black border-2 border-yellow-800;
+  }
+  
+  .confidence-low {
+    @apply bg-red-200 text-black border-2 border-red-800;
+  }
+}
+
+/* Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+  .translation-panel,
+  .language-dropdown,
+  .translation-element {
+    @apply transition-none;
+  }
+  
+  .translation-loading::before {
+    animation: none;
+  }
+  
+  .translation-active {
+    animation: none;
+    @apply bg-blue-100;
+  }
+}

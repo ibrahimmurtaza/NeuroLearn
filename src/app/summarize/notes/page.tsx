@@ -807,7 +807,7 @@ export default function NotesFlashcards() {
                         </p>
                         
                         <div className="flex items-center justify-between text-xs text-muted-foreground">
-                          <span className="capitalize">{note.type}</span>
+                          <span className="capitalize">{note.note_type}</span>
                           <span>{new Date(note.created_at).toLocaleDateString()}</span>
                         </div>
                       </div>

@@ -1,5 +1,5 @@
 // Base types
-export type SummaryType = 'brief' | 'detailed' | 'bullet_points' | 'chapters' | 'document' | 'video' | 'audio' | 'multi_doc_comparison' | 'multi_doc_synthesis' | 'multi_doc_themes' | 'multi_doc_timeline' | 'executive' | 'academic' | 'custom'
+export type SummaryType = 'short' | 'medium' | 'detailed' | 'brief' | 'bullet_points' | 'executive' | 'academic' | 'custom'
 export type NoteType = 'outline' | 'mind_map' | 'cornell' | 'linear' | 'concept_map'
 export type FlashcardDifficulty = 'easy' | 'medium' | 'hard'
 export type DocumentStatus = 'uploading' | 'processing' | 'ready' | 'error'
@@ -209,6 +209,63 @@ export interface AudioProcessingSettings {
   generate_transcript: boolean
   identify_speakers: boolean
   model_used: string
+  language?: string
+  summaryType?: 'brief' | 'detailed' | 'bullet-points'
+  audioType?: 'podcast' | 'lecture' | 'meeting' | 'interview' | 'general'
+  includeTimestamps?: boolean
+  speakerIdentification?: boolean
+}
+
+export interface AudioFile {
+  id: string
+  name: string
+  size: number
+  type: string
+  url?: string
+  duration?: number
+  transcript?: string
+}
+
+export interface AudioProcessRequest {
+  file: File
+  folderId?: string
+  userId: string
+  language?: string
+  summaryType?: string
+  audioType?: string
+}
+
+export interface AudioProcessResponse {
+  success: boolean
+  document: {
+    id: string
+    title: string
+    fileName: string
+    fileType: string
+    fileSize: number
+    language: string
+    processingStatus: DocumentStatus
+    wordCount: number
+    characterCount: number
+    createdAt: string
+    updatedAt: string
+  }
+  transcript: string
+  summary?: {
+    id: string
+    documentId: string
+    summaryType: string
+    content: string
+    keyPoints: string[]
+    language: string
+    wordCount: number
+    processingStatus: DocumentStatus
+    createdAt: string
+    updatedAt: string
+  }
+  chunksCreated: number
+  speakers?: string[]
+  duration: number | null
 }
 
 // Notes and flashcards types
@@ -667,7 +724,7 @@ export interface HistoryItem {
   keyPoints: string[]
   language: string
   wordCount: number
-  processingStatus: ProcessingStatus
+  processingStatus: DocumentStatus
   documentId?: string
   documentTitle?: string
   documentType?: string
@@ -732,7 +789,7 @@ export interface GenerateSummaryResponse {
     keyPoints: string[]
     language: string
     wordCount: number
-    processingStatus: ProcessingStatus
+    processingStatus: DocumentStatus
     createdAt: string
     updatedAt: string
   }
@@ -740,9 +797,9 @@ export interface GenerateSummaryResponse {
 
 // Notes and Flashcards API types
 export interface NotesGenerationRequest {
-  documentId?: string
-  summaryId?: string
-  noteType: NoteType
+  documentIds?: string[]
+  summaryIds?: string[]
+  notesType: NoteType
   language?: string
   subject?: string
   userId: string
@@ -754,19 +811,23 @@ export interface NotesGenerationResponse {
     id: string
     title: string
     content: string
-    noteType: NoteType
+    notesType: NoteType
     language: string
+    sourceDocumentIds: string[]
+    metadata: any
     createdAt: string
+    updatedAt: string
   }
 }
 
 export interface FlashcardsGenerationRequest {
-  documentId?: string
-  summaryId?: string
+  documentIds?: string[]
+  summaryIds?: string[]
   difficulty: FlashcardDifficulty
   count?: number
   language?: string
   category?: string
+  subject?: string
   userId: string
 }
 
@@ -779,8 +840,11 @@ export interface FlashcardsGenerationResponse {
     difficulty: FlashcardDifficulty
     category?: string
     language: string
+    sourceDocumentIds: string[]
     createdAt: string
+    updatedAt: string
   }>
+  count: number
 }
 
 export interface UseSummarizationReturn {

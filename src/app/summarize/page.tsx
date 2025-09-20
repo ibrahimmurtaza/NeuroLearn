@@ -21,7 +21,9 @@ import {
   ArrowRight,
   Plus,
   Type,
-  History
+  History,
+  Play,
+  Calendar
 } from 'lucide-react';
 
 interface SummarizationStats {
@@ -29,6 +31,16 @@ interface SummarizationStats {
   totalSummaries: number;
   totalNotes: number;
   totalFlashcards: number;
+}
+
+interface FlashcardSet {
+  id: string;
+  title: string;
+  topic: string;
+  card_count: number;
+  created_at: string;
+  updated_at: string;
+  difficulty?: 'easy' | 'medium' | 'hard';
 }
 
 const SummarizationDashboard = () => {
@@ -39,19 +51,43 @@ const SummarizationDashboard = () => {
     totalNotes: 0,
     totalFlashcards: 0
   });
+  const [flashcardSets, setFlashcardSets] = useState<FlashcardSet[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingFlashcards, setIsLoadingFlashcards] = useState(true);
+
+  const fetchFlashcardSets = async () => {
+    if (!user?.id) return;
+    
+    try {
+      setIsLoadingFlashcards(true);
+      const response = await fetch(`/api/flashcards?userId=${user.id}&limit=6`);
+      if (response.ok) {
+        const data = await response.json();
+        setFlashcardSets(data.flashcardSets || []);
+        // Update flashcards count in stats
+        setStats(prev => ({
+          ...prev,
+          totalFlashcards: data.pagination?.total || 0
+        }));
+      }
+    } catch (error) {
+      console.error('Error fetching flashcard sets:', error);
+    } finally {
+      setIsLoadingFlashcards(false);
+    }
+  };
 
   useEffect(() => {
     const fetchStats = async () => {
       try {
-        // Simulate API call
+        // Simulate API call for other stats
         await new Promise(resolve => setTimeout(resolve, 1000));
-        setStats({
+        setStats(prev => ({
+          ...prev,
           totalDocuments: 24,
           totalSummaries: 156,
-          totalNotes: 89,
-          totalFlashcards: 234
-        });
+          totalNotes: 89
+        }));
       } catch (error) {
         console.error('Error fetching stats:', error);
       } finally {
@@ -60,7 +96,8 @@ const SummarizationDashboard = () => {
     };
 
     fetchStats();
-  }, []);
+    fetchFlashcardSets();
+  }, [user?.id]);
 
   const summarizationModes = [
     {
@@ -195,18 +232,20 @@ const SummarizationDashboard = () => {
             </div>
           </div>
           
-          <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-100">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Flashcards</p>
-                <p className="text-2xl font-bold text-gray-900">{stats.totalFlashcards}</p>
+          <Link href="/summarize/flashcards" className="block">
+            <div className="bg-gradient-to-br from-orange-50 to-amber-50 p-6 rounded-xl border border-orange-100 hover:shadow-lg transition-all duration-300 cursor-pointer">
+              <div className="flex items-center justify-between mb-4">
+                <div className="p-3 bg-orange-100 rounded-lg">
+                  <Target className="h-6 w-6 text-orange-600" />
+                </div>
+                <span className="text-2xl font-bold text-orange-600">{stats.totalFlashcards}</span>
               </div>
-              <div className="p-3 bg-orange-100 rounded-lg">
-                <Target className="h-6 w-6 text-orange-600" />
-              </div>
+              <h3 className="text-lg font-semibold text-gray-800 mb-2">Flashcards</h3>
+              <p className="text-gray-600 text-sm">Study cards created</p>
             </div>
-          </div>
+          </Link>
         </div>
+
 
         {/* Summarization Modes - Main Feature */}
         <div className="mb-12">

@@ -10,6 +10,44 @@ const supabase = createClient(
 
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY!);
 
+// Rate limiting configuration
+const RATE_LIMIT = {
+  requestsPerMinute: 15,
+  delayBetweenRequests: 4000, // 4 seconds
+  maxRetries: 3,
+  baseDelay: 2000 // 2 seconds
+};
+
+// Simple rate limiter
+class RateLimiter {
+  private requests: number[] = [];
+  
+  async waitIfNeeded(): Promise<void> {
+    const now = Date.now();
+    const oneMinuteAgo = now - 60000;
+    
+    // Remove old requests
+    this.requests = this.requests.filter(time => time > oneMinuteAgo);
+    
+    // Check if we need to wait
+    if (this.requests.length >= RATE_LIMIT.requestsPerMinute) {
+      const oldestRequest = Math.min(...this.requests);
+      const waitTime = oldestRequest + 60000 - now;
+      if (waitTime > 0) {
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      }
+    }
+    
+    // Add current request
+    this.requests.push(now);
+    
+    // Add delay between requests
+    await new Promise(resolve => setTimeout(resolve, RATE_LIMIT.delayBetweenRequests));
+  }
+}
+
+const rateLimiter = new RateLimiter();
+
 // Summary length configurations
 const SUMMARY_CONFIGS = {
   short: {
@@ -45,21 +83,48 @@ async function generateTextSummary(
   length: 'short' | 'medium' | 'detailed',
   language: string = 'en'
 ): Promise<string> {
-  try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-    
-    const config = SUMMARY_CONFIGS[length];
-    const languageInstruction = LANGUAGE_INSTRUCTIONS[language as keyof typeof LANGUAGE_INSTRUCTIONS] || LANGUAGE_INSTRUCTIONS.en;
-    
-    const prompt = `${languageInstruction}\n\n${config.prompt}\n\nTarget length: approximately ${config.maxWords} words.\n\nText to summarize:\n\n${text}`;
-    
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    return response.text();
-  } catch (error) {
-    console.error('AI generation error:', error);
-    throw new Error('Failed to generate summary with AI');
+  let lastError: any;
+  
+  for (let attempt = 1; attempt <= RATE_LIMIT.maxRetries; attempt++) {
+    try {
+      // Apply rate limiting
+      await rateLimiter.waitIfNeeded();
+      
+      const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+      
+      // Truncate content if too long (max ~30k chars to stay within token limits)
+      const truncatedText = text.length > 30000 ? text.substring(0, 30000) + '...' : text;
+      
+      const config = SUMMARY_CONFIGS[length];
+      const languageInstruction = LANGUAGE_INSTRUCTIONS[language as keyof typeof LANGUAGE_INSTRUCTIONS] || LANGUAGE_INSTRUCTIONS.en;
+      
+      const prompt = `${languageInstruction}\n\n${config.prompt}\n\nTarget length: approximately ${config.maxWords} words.\n\nText to summarize:\n\n${truncatedText}`;
+      
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+      return response.text();
+    } catch (error: any) {
+      lastError = error;
+      console.error(`AI generation error (attempt ${attempt}):`, error);
+      
+      // Check if it's a quota/rate limit error
+      if (error?.status === 429 || error?.message?.includes('quota') || error?.message?.includes('rate limit')) {
+        if (attempt < RATE_LIMIT.maxRetries) {
+          const delay = RATE_LIMIT.baseDelay * Math.pow(2, attempt - 1); // Exponential backoff
+          console.log(`Rate limit hit, waiting ${delay}ms before retry ${attempt + 1}/${RATE_LIMIT.maxRetries}`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        } else {
+          throw new Error('Google Gemini API quota exceeded. Please try again later.');
+        }
+      }
+      
+      // For other errors, don't retry
+      throw new Error('Failed to generate summary with AI');
+    }
   }
+  
+  throw lastError || new Error('Failed to generate summary after all retries');
 }
 
 function countWords(text: string): number {
@@ -167,9 +232,13 @@ export async function POST(request: NextRequest) {
         );
       }
       
-      if (error.message.includes('quota') || error.message.includes('rate limit')) {
+      if (error.message.includes('quota exceeded') || error.message.includes('quota') || error.message.includes('rate limit')) {
         return NextResponse.json(
-          { error: 'Service temporarily unavailable. Please try again later.' },
+          { 
+            error: 'Google Gemini API quota exceeded',
+            message: 'The AI service has reached its usage limit. Please try again later.',
+            retryAfter: '60 seconds'
+          },
           { status: 429 }
         );
       }

@@ -11,54 +11,118 @@ const supabase = createClient(
 
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY!);
 
+// Rate limiting configuration
+const RATE_LIMIT = {
+  requestsPerMinute: 15,
+  baseDelay: 2000, // 2 seconds
+  maxRetries: 3
+};
+
+// Rate limiter class
+class RateLimiter {
+  private requests: number[] = [];
+  
+  async waitIfNeeded(): Promise<void> {
+    const now = Date.now();
+    const oneMinuteAgo = now - 60000;
+    
+    // Remove requests older than 1 minute
+    this.requests = this.requests.filter(time => time > oneMinuteAgo);
+    
+    // If we're at the limit, wait
+    if (this.requests.length >= RATE_LIMIT.requestsPerMinute) {
+      const oldestRequest = Math.min(...this.requests);
+      const waitTime = oldestRequest + 60000 - now;
+      if (waitTime > 0) {
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      }
+    }
+    
+    // Add current request
+    this.requests.push(now);
+    
+    // Add base delay between requests
+    await new Promise(resolve => setTimeout(resolve, RATE_LIMIT.baseDelay));
+  }
+}
+
+const rateLimiter = new RateLimiter();
+
 // Multi-document analysis utilities
 async function analyzeMultipleDocuments(
   documents: Array<{ id: string; title: string; content: string }>,
   analysisType: 'comparison' | 'synthesis' | 'themes' | 'timeline' = 'synthesis',
   language: string = 'en'
 ): Promise<{ analysis: string; insights: string[]; connections: Array<{ doc1: string; doc2: string; relationship: string }> }> {
+  const languageInstructions = {
+    en: 'Respond in English.',
+    es: 'Responde en español.',
+    fr: 'Répondez en français.',
+    de: 'Antworten Sie auf Deutsch.',
+    it: 'Rispondi in italiano.',
+    pt: 'Responda em português.',
+    ru: 'Отвечайте на русском языке.',
+    ja: '日本語で回答してください。',
+    ko: '한국어로 답변해 주세요.',
+    zh: '请用中文回答。'
+  };
+
+  const languageInstruction = languageInstructions[language as keyof typeof languageInstructions] || languageInstructions.en;
+  
+  const analysisPrompts = {
+    comparison: `${languageInstruction}\n\nCompare and contrast the following documents. Identify similarities, differences, strengths, and weaknesses of each document. Provide a comprehensive comparative analysis.`,
+    synthesis: `${languageInstruction}\n\nSynthesize the information from the following documents into a cohesive analysis. Identify common themes, complementary information, and create a unified understanding.`,
+    themes: `${languageInstruction}\n\nAnalyze the following documents to identify recurring themes, patterns, and concepts. Group related ideas and explain their significance across the documents.`,
+    timeline: `${languageInstruction}\n\nAnalyze the following documents to create a chronological understanding. Identify temporal relationships, sequences of events, and historical progression.`
+  };
+
+  // Prepare document content for analysis (truncate if too long)
+  const documentContent = documents.map((doc, index) => {
+    const truncatedContent = doc.content.length > 10000 ? doc.content.substring(0, 10000) + '...' : doc.content;
+    return `Document ${index + 1}: ${doc.title}\n${truncatedContent}\n\n`;
+  }).join('');
+
+  // Helper function for AI calls with retry logic
+  async function makeAICall(prompt: string, description: string): Promise<string> {
+    let lastError: any;
+    
+    for (let attempt = 1; attempt <= RATE_LIMIT.maxRetries; attempt++) {
+      try {
+        await rateLimiter.waitIfNeeded();
+        
+        const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+        const result = await model.generateContent(prompt);
+        const response = await result.response;
+        return response.text();
+      } catch (error: any) {
+        lastError = error;
+        console.error(`${description} error (attempt ${attempt}):`, error);
+        
+        if (error?.status === 429 || error?.message?.includes('quota') || error?.message?.includes('rate limit')) {
+          if (attempt < RATE_LIMIT.maxRetries) {
+            const delay = RATE_LIMIT.baseDelay * Math.pow(2, attempt - 1);
+            console.log(`Rate limit hit for ${description}, waiting ${delay}ms before retry ${attempt + 1}/${RATE_LIMIT.maxRetries}`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          } else {
+            throw new Error(`Google Gemini API quota exceeded while generating ${description}. Please try again later.`);
+          }
+        }
+        
+        throw new Error(`Failed to generate ${description}`);
+      }
+    }
+    
+    throw lastError || new Error(`Failed to generate ${description} after all retries`);
+  }
+
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
-    
-    const languageInstructions = {
-      en: 'Respond in English.',
-      es: 'Responde en español.',
-      fr: 'Répondez en français.',
-      de: 'Antworten Sie auf Deutsch.',
-      it: 'Rispondi in italiano.',
-      pt: 'Responda em português.',
-      ru: 'Отвечайте на русском языке.',
-      ja: '日本語で回答してください。',
-      ko: '한국어로 답변해 주세요.',
-      zh: '请用中文回答。'
-    };
-
-    const languageInstruction = languageInstructions[language as keyof typeof languageInstructions] || languageInstructions.en;
-    
-    const analysisPrompts = {
-      comparison: `${languageInstruction}\n\nCompare and contrast the following documents. Identify similarities, differences, strengths, and weaknesses of each document. Provide a comprehensive comparative analysis.`,
-      synthesis: `${languageInstruction}\n\nSynthesize the information from the following documents into a cohesive analysis. Identify common themes, complementary information, and create a unified understanding.`,
-      themes: `${languageInstruction}\n\nAnalyze the following documents to identify recurring themes, patterns, and concepts. Group related ideas and explain their significance across the documents.`,
-      timeline: `${languageInstruction}\n\nAnalyze the following documents to create a chronological understanding. Identify temporal relationships, sequences of events, and historical progression.`
-    };
-
-    // Prepare document content for analysis
-    const documentContent = documents.map((doc, index) => 
-      `Document ${index + 1}: ${doc.title}\n${doc.content}\n\n`
-    ).join('');
-
     const analysisPrompt = `${analysisPrompts[analysisType]}\n\nDocuments to analyze:\n\n${documentContent}`;
-    
-    const analysisResult = await model.generateContent(analysisPrompt);
-    const analysisResponse = await analysisResult.response;
-    const analysis = analysisResponse.text();
+    const analysis = await makeAICall(analysisPrompt, 'multi-document analysis');
 
     // Generate insights
     const insightsPrompt = `${languageInstruction}\n\nBased on the analysis of multiple documents, extract 5-8 key insights that emerge from the collective information. Focus on new understanding that comes from considering all documents together:\n\n${analysis}`;
-    
-    const insightsResult = await model.generateContent(insightsPrompt);
-    const insightsResponse = await insightsResult.response;
-    const insightsText = insightsResponse.text();
+    const insightsText = await makeAICall(insightsPrompt, 'insights');
     
     const insights = insightsText
       .split('\n')
@@ -68,10 +132,7 @@ async function analyzeMultipleDocuments(
 
     // Generate connections between documents
     const connectionsPrompt = `${languageInstruction}\n\nIdentify specific relationships and connections between the documents. For each connection, specify which documents are related and describe the nature of their relationship:\n\n${documentContent}`;
-    
-    const connectionsResult = await model.generateContent(connectionsPrompt);
-    const connectionsResponse = await connectionsResult.response;
-    const connectionsText = connectionsResponse.text();
+    const connectionsText = await makeAICall(connectionsPrompt, 'connections');
     
     // Parse connections (simplified implementation)
     const connections: Array<{ doc1: string; doc2: string; relationship: string }> = [];
@@ -101,8 +162,13 @@ async function analyzeMultipleDocuments(
       insights,
       connections
     };
-  } catch (error) {
+  } catch (error: any) {
     console.error('Multi-document analysis error:', error);
+    
+    if (error.message?.includes('rate limit') || error.message?.includes('quota exceeded')) {
+      throw new Error(`Google Gemini API quota exceeded. Please try again later. ${error.message}`);
+    }
+    
     throw new Error('Failed to analyze multiple documents');
   }
 }
@@ -187,7 +253,7 @@ export async function POST(request: NextRequest) {
         key_points: insights,
         language,
         word_count: analysis.split(/\s+/).length,
-        processing_status: 'completed' as ProcessingStatus,
+        processing_status: 'ready',
         user_id: userId,
         metadata: {
           title: title || `Multi-Document ${analysisType.charAt(0).toUpperCase() + analysisType.slice(1)} Analysis`,

@@ -1,383 +1,241 @@
+// app/api/summarize/history/route.ts
+// Updated to match your actual table schema
+
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-import { HistoryRequest, HistoryResponse, HistoryItem } from '@/types/summarization';
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
-
-// History utilities
-function formatHistoryItem(summary: any, document?: any): HistoryItem {
-  return {
-    id: summary.id,
-    title: summary.metadata?.title || document?.title || 'Untitled',
-    type: summary.summary_type,
-    content: summary.content,
-    keyPoints: summary.key_points || [],
-    language: summary.language,
-    wordCount: summary.word_count,
-    processingStatus: summary.processing_status,
-    documentId: summary.document_id,
-    documentTitle: document?.title,
-    documentType: document?.file_type,
-    createdAt: summary.created_at,
-    updatedAt: summary.updated_at,
-    metadata: {
-      analysisType: summary.metadata?.analysis_type,
-      documentIds: summary.metadata?.document_ids,
-      documentTitles: summary.metadata?.document_titles,
-      connections: summary.metadata?.connections,
-      processingTime: summary.metadata?.processing_time,
-      modelUsed: summary.metadata?.model_used
-    }
-  };
-}
+import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
+import { cookies } from 'next/headers';
 
 export async function GET(request: NextRequest) {
+  console.log('=== API Route Called ===');
+  
   try {
+    const supabase = createRouteHandlerClient({ cookies });
     const { searchParams } = new URL(request.url);
+    
     const userId = searchParams.get('userId');
     const limit = parseInt(searchParams.get('limit') || '50');
-    const offset = parseInt(searchParams.get('offset') || '0');
-    const type = searchParams.get('type'); // 'document', 'video', 'audio', 'multi_doc', etc.
-    const language = searchParams.get('language');
-    const search = searchParams.get('search');
     const sortBy = searchParams.get('sortBy') || 'created_at';
     const sortOrder = searchParams.get('sortOrder') || 'desc';
-    const dateFrom = searchParams.get('dateFrom');
-    const dateTo = searchParams.get('dateTo');
+    const offset = parseInt(searchParams.get('offset') || '0');
 
-    if (!userId) {
-      return NextResponse.json(
-        { error: 'User ID is required' },
-        { status: 400 }
-      );
+    console.log('Query params:', { userId, limit, sortBy, sortOrder });
+
+    // Get authenticated user (for security)
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    
+    if (authError) {
+      console.log('Auth error:', authError.message);
     }
+    
+    // Use authenticated user ID if available, otherwise use the provided userId
+    const queryUserId = user?.id || userId;
+    console.log('Querying for user:', queryUserId);
 
-    // Build query
+    // Query your actual table structure
     let query = supabase
       .from('summaries')
       .select(`
-        *,
-        documents (
-          id,
-          title,
-          file_type,
-          file_size,
-          created_at
-        )
-      `)
-      .eq('user_id', userId)
-      .range(offset, offset + limit - 1);
+        id,
+        title,
+        content,
+        summary_type,
+        language,
+        source_documents,
+        query,
+        created_at,
+        updated_at,
+        user_id
+      `);
 
-    // Apply filters
-    if (type) {
-      if (type === 'multi_doc') {
-        query = query.like('summary_type', 'multi_doc_%');
-      } else {
-        query = query.eq('summary_type', type);
-      }
-    }
-
-    if (language) {
-      query = query.eq('language', language);
-    }
-
-    if (search) {
-      query = query.or(`content.ilike.%${search}%,metadata->>title.ilike.%${search}%`);
-    }
-
-    if (dateFrom) {
-      query = query.gte('created_at', dateFrom);
-    }
-
-    if (dateTo) {
-      query = query.lte('created_at', dateTo);
+    // Filter by user_id if we have one
+    if (queryUserId) {
+      query = query.eq('user_id', queryUserId);
     }
 
     // Apply sorting
-    const validSortFields = ['created_at', 'updated_at', 'word_count', 'summary_type'];
-    const sortField = validSortFields.includes(sortBy) ? sortBy : 'created_at';
-    const ascending = sortOrder === 'asc';
+    const validSortColumns = ['created_at', 'updated_at', 'title', 'summary_type'];
+    const sortColumn = validSortColumns.includes(sortBy) ? sortBy : 'created_at';
+    const sortDirection = sortOrder === 'asc';
     
-    query = query.order(sortField, { ascending });
+    query = query.order(sortColumn, { ascending: sortDirection });
 
-    const { data: summaries, error: summariesError } = await query;
+    // Apply pagination
+    query = query.range(offset, offset + limit - 1);
 
-    if (summariesError) {
-      console.error('Error fetching history:', summariesError);
+    console.log('Executing query...');
+    const { data: summaries, error: fetchError } = await query;
+
+    if (fetchError) {
+      console.error('Database fetch error:', fetchError);
       return NextResponse.json(
-        { error: 'Failed to fetch history' },
+        { success: false, error: 'Failed to fetch summaries from database', details: fetchError.message },
         { status: 500 }
       );
     }
+
+    console.log(`Found ${summaries?.length || 0} summaries`);
+    
+    // Try to extract document information from source_documents metadata
+    // This is a fallback approach since document_id column may not exist yet
+    
+    // Transform data to match frontend expectations
+    const transformedSummaries = summaries?.map(summary => {
+      // Calculate word count from content
+      const wordCount = summary.content ? summary.content.split(' ').length : 0;
+      // Try to extract document title from source_documents metadata
+      let documentTitle = null;
+      if (summary.source_documents && typeof summary.source_documents === 'object') {
+        // Check if source_documents contains document information
+        if (Array.isArray(summary.source_documents) && summary.source_documents.length > 0) {
+          documentTitle = summary.source_documents[0].filename || summary.source_documents[0].title || summary.source_documents[0].name || null;
+        } else if (summary.source_documents.filename) {
+          documentTitle = summary.source_documents.filename;
+        } else if (summary.source_documents.title) {
+          documentTitle = summary.source_documents.title;
+        }
+      }
+      
+      return {
+        id: summary.id,
+        title: summary.title || 'Untitled Summary',
+        content: summary.content || '',
+        documentType: summary.summary_type || 'document',
+        createdAt: summary.created_at,
+        updatedAt: summary.updated_at,
+        wordCount: wordCount,
+        processingStatus: 'completed',
+        keyPoints: [], // Not in your schema
+        tags: [], // Not in your schema
+        metadata: summary.source_documents || {}, // Empty metadata
+        documentTitle: documentTitle,
+        documentId: null, // Not available in current schema
+        language: summary.language,
+        query: summary.query // Not in schema
+      };
+      }) || [];
 
     // Get total count for pagination
     let countQuery = supabase
       .from('summaries')
-      .select('id', { count: 'exact', head: true })
-      .eq('user_id', userId);
-
-    if (type) {
-      if (type === 'multi_doc') {
-        countQuery = countQuery.like('summary_type', 'multi_doc_%');
-      } else {
-        countQuery = countQuery.eq('summary_type', type);
-      }
+      .select('*', { count: 'exact', head: true });
+    
+    if (queryUserId) {
+      countQuery = countQuery.eq('user_id', queryUserId);
     }
+    
+    const { count } = await countQuery;
 
-    if (language) {
-      countQuery = countQuery.eq('language', language);
-    }
+    console.log(`Total summaries: ${count}, Returning: ${transformedSummaries.length}`);
 
-    if (search) {
-      countQuery = countQuery.or(`content.ilike.%${search}%,metadata->>title.ilike.%${search}%`);
-    }
-
-    if (dateFrom) {
-      countQuery = countQuery.gte('created_at', dateFrom);
-    }
-
-    if (dateTo) {
-      countQuery = countQuery.lte('created_at', dateTo);
-    }
-
-    const { count, error: countError } = await countQuery;
-
-    if (countError) {
-      console.error('Error getting count:', countError);
-    }
-
-    // Format history items
-    const historyItems: HistoryItem[] = summaries?.map(summary => 
-      formatHistoryItem(summary, summary.documents)
-    ) || [];
-
-    // Get statistics
-    const { data: stats } = await supabase
-      .from('summaries')
-      .select('summary_type, language, created_at')
-      .eq('user_id', userId);
-
-    const statistics = {
-      totalSummaries: count || 0,
-      byType: {} as Record<string, number>,
-      byLanguage: {} as Record<string, number>,
-      byMonth: {} as Record<string, number>
-    };
-
-    if (stats) {
-      stats.forEach(stat => {
-        // Count by type
-        statistics.byType[stat.summary_type] = (statistics.byType[stat.summary_type] || 0) + 1;
-        
-        // Count by language
-        statistics.byLanguage[stat.language] = (statistics.byLanguage[stat.language] || 0) + 1;
-        
-        // Count by month
-        const month = new Date(stat.created_at).toISOString().slice(0, 7); // YYYY-MM
-        statistics.byMonth[month] = (statistics.byMonth[month] || 0) + 1;
-      });
-    }
-
-    const response: HistoryResponse = {
+    return NextResponse.json({
       success: true,
-      items: historyItems,
+      items: transformedSummaries,
       pagination: {
         total: count || 0,
         limit,
         offset,
-        hasMore: (offset + limit) < (count || 0)
-      },
-      statistics,
-      filters: {
-        type,
-        language,
-        search,
-        dateFrom,
-        dateTo,
-        sortBy: sortField,
-        sortOrder
+        hasMore: (count || 0) > offset + limit
       }
-    };
-
-    return NextResponse.json(response);
-
-  } catch (error) {
-    console.error('History fetch error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
-  }
-}
-
-export async function DELETE(request: NextRequest) {
-  try {
-    const body: { summaryIds: string[]; userId: string } = await request.json();
-    const { summaryIds, userId } = body;
-
-    if (!summaryIds?.length || !userId) {
-      return NextResponse.json(
-        { error: 'Summary IDs and user ID are required' },
-        { status: 400 }
-      );
-    }
-
-    // Verify ownership and delete summaries
-    const { data: summaries, error: fetchError } = await supabase
-      .from('summaries')
-      .select('id')
-      .in('id', summaryIds)
-      .eq('user_id', userId);
-
-    if (fetchError) {
-      console.error('Error fetching summaries for deletion:', fetchError);
-      return NextResponse.json(
-        { error: 'Failed to verify summaries' },
-        { status: 500 }
-      );
-    }
-
-    if (!summaries || summaries.length !== summaryIds.length) {
-      return NextResponse.json(
-        { error: 'Some summaries not found or access denied' },
-        { status: 404 }
-      );
-    }
-
-    // Delete summary sources first (foreign key constraint)
-    const { error: sourcesError } = await supabase
-      .from('summary_sources')
-      .delete()
-      .in('summary_id', summaryIds);
-
-    if (sourcesError) {
-      console.error('Error deleting summary sources:', sourcesError);
-      return NextResponse.json(
-        { error: 'Failed to delete summary sources' },
-        { status: 500 }
-      );
-    }
-
-    // Delete summaries
-    const { error: deleteError } = await supabase
-      .from('summaries')
-      .delete()
-      .in('id', summaryIds)
-      .eq('user_id', userId);
-
-    if (deleteError) {
-      console.error('Error deleting summaries:', deleteError);
-      return NextResponse.json(
-        { error: 'Failed to delete summaries' },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({
-      success: true,
-      deletedCount: summaryIds.length,
-      message: `Successfully deleted ${summaryIds.length} summary(ies)`
     });
 
   } catch (error) {
-    console.error('History deletion error:', error);
+    console.error('=== API Route FAILED ===');
+    console.error('Error:', error);
+    
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { 
+        success: false, 
+        error: 'Internal server error',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      },
       { status: 500 }
     );
   }
 }
 
-export async function PATCH(request: NextRequest) {
+export async function POST(request: NextRequest) {
   try {
-    const body: {
-      summaryId: string;
-      userId: string;
-      updates: {
-        title?: string;
-        content?: string;
-        keyPoints?: string[];
-        metadata?: any;
-      };
-    } = await request.json();
+    const supabase = createRouteHandlerClient({ cookies });
     
-    const { summaryId, userId, updates } = body;
-
-    if (!summaryId || !userId || !updates) {
+    // Get authenticated user
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    
+    if (authError || !user) {
       return NextResponse.json(
-        { error: 'Summary ID, user ID, and updates are required' },
+        { success: false, error: 'Unauthorized' },
+        { status: 401 }
+      );
+    }
+
+    const {
+      title,
+      content,
+      summary_type = 'short',
+      language = 'en',
+      source_documents = [],
+      query
+    } = await request.json();
+
+    // Validate required fields
+    if (!content) {
+      return NextResponse.json(
+        { success: false, error: 'Content is required' },
         { status: 400 }
       );
     }
 
-    // Verify ownership
-    const { data: existingSummary, error: fetchError } = await supabase
-      .from('summaries')
-      .select('id, metadata')
-      .eq('id', summaryId)
-      .eq('user_id', userId)
-      .single();
-
-    if (fetchError || !existingSummary) {
+    // Validate summary_type against valid values
+    const validTypes = ['short', 'medium', 'detailed'];
+    if (!validTypes.includes(summary_type)) {
       return NextResponse.json(
-        { error: 'Summary not found or access denied' },
-        { status: 404 }
+        { success: false, error: `Summary type must be one of: ${validTypes.join(', ')}` },
+        { status: 400 }
       );
     }
 
-    // Prepare update data
-    const updateData: any = {
-      updated_at: new Date().toISOString()
-    };
-
-    if (updates.content !== undefined) {
-      updateData.content = updates.content;
-      updateData.word_count = updates.content.split(/\s+/).length;
-    }
-
-    if (updates.keyPoints !== undefined) {
-      updateData.key_points = updates.keyPoints;
-    }
-
-    if (updates.title !== undefined || updates.metadata !== undefined) {
-      const currentMetadata = existingSummary.metadata || {};
-      updateData.metadata = {
-        ...currentMetadata,
-        ...(updates.metadata || {}),
-        ...(updates.title && { title: updates.title })
-      };
-    }
-
-    // Update summary
-    const { data: updatedSummary, error: updateError } = await supabase
+    // Insert new summary using your table structure
+    const { data: summary, error: insertError } = await supabase
       .from('summaries')
-      .update(updateData)
-      .eq('id', summaryId)
-      .eq('user_id', userId)
+      .insert({
+        user_id: user.id,
+        title: title || 'New Summary',
+        content,
+        summary_type,
+        language,
+        source_documents,
+        query
+      })
       .select()
       .single();
 
-    if (updateError) {
-      console.error('Error updating summary:', updateError);
+    if (insertError) {
+      console.error('Error creating summary:', insertError);
       return NextResponse.json(
-        { error: 'Failed to update summary' },
+        { success: false, error: 'Failed to create summary', details: insertError.message },
         { status: 500 }
       );
     }
 
+    const wordCount = summary.content ? summary.content.split(' ').length : 0;
+
     return NextResponse.json({
       success: true,
-      summary: formatHistoryItem(updatedSummary),
-      message: 'Summary updated successfully'
+      summary: {
+        id: summary.id,
+        title: summary.title,
+        content: summary.content,
+        documentType: summary.summary_type,
+        createdAt: summary.created_at,
+        updatedAt: summary.updated_at,
+        wordCount: wordCount,
+        processingStatus: 'completed'
+      }
     });
 
   } catch (error) {
-    console.error('History update error:', error);
+    console.error('Unexpected error in summary creation:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { success: false, error: 'Internal server error', details: error instanceof Error ? error.message : 'Unknown error' },
       { status: 500 }
     );
   }

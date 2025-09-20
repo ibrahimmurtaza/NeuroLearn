@@ -2,13 +2,54 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { v4 as uuidv4 } from 'uuid';
+import * as pdfParse from 'pdf-parse';
+import mammoth from 'mammoth';
+import pptx2json from 'pptx2json';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY!);
+const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY!);
+
+// Rate limiting configuration
+const RATE_LIMIT = {
+  requestsPerMinute: 15,
+  delayBetweenRequests: 4000, // 4 seconds
+  maxRetries: 3,
+  baseDelay: 2000 // 2 seconds
+};
+
+// Simple rate limiter
+class RateLimiter {
+  private requests: number[] = [];
+  
+  async waitIfNeeded(): Promise<void> {
+    const now = Date.now();
+    const oneMinuteAgo = now - 60000;
+    
+    // Remove old requests
+    this.requests = this.requests.filter(time => time > oneMinuteAgo);
+    
+    // Check if we need to wait
+    if (this.requests.length >= RATE_LIMIT.requestsPerMinute) {
+      const oldestRequest = Math.min(...this.requests);
+      const waitTime = oldestRequest + 60000 - now;
+      if (waitTime > 0) {
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      }
+    }
+    
+    // Add current request
+    this.requests.push(now);
+    
+    // Add delay between requests
+    await new Promise(resolve => setTimeout(resolve, RATE_LIMIT.delayBetweenRequests));
+  }
+}
+
+const rateLimiter = new RateLimiter();
 
 // Document processing utilities
 async function extractTextFromFile(file: File): Promise<string> {
@@ -55,47 +96,76 @@ async function generateDocumentSummary(
   language: string = 'en',
   focusAreas?: string[]
 ): Promise<{ summary: string; keyPoints: string[]; insights: string[] }> {
+  const languageInstructions = {
+    en: 'Respond in English.',
+    es: 'Responde en español.',
+    fr: 'Répondez en français.',
+    de: 'Antworten Sie auf Deutsch.',
+    it: 'Rispondi in italiano.',
+    pt: 'Responda em português.',
+    ru: 'Отвечайте на русском языке.',
+    ja: '日本語で回答してください。',
+    ko: '한국어로 답변해 주세요.',
+    zh: '请用中文回答。'
+  };
+
+  const languageInstruction = languageInstructions[language as keyof typeof languageInstructions] || languageInstructions.en;
+  
+  const lengthInstructions = {
+    short: 'Provide a concise summary in 2-3 sentences.',
+    medium: 'Provide a comprehensive summary in 1-2 paragraphs.',
+    detailed: 'Provide a detailed summary with multiple paragraphs covering all major points.'
+  };
+
+  const focusInstruction = focusAreas && focusAreas.length > 0 
+    ? `Pay special attention to these areas: ${focusAreas.join(', ')}.`
+    : '';
+
+  // Truncate content if too long
+  const truncatedContent = content.length > 30000 ? content.substring(0, 30000) + '...' : content;
+
+  // Helper function for AI calls with retry logic
+  async function makeAICall(prompt: string, description: string): Promise<string> {
+    let lastError: any;
+    
+    for (let attempt = 1; attempt <= RATE_LIMIT.maxRetries; attempt++) {
+      try {
+        await rateLimiter.waitIfNeeded();
+        
+        const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+        const result = await model.generateContent(prompt);
+        const response = await result.response;
+        return response.text();
+      } catch (error: any) {
+        lastError = error;
+        console.error(`${description} error (attempt ${attempt}):`, error);
+        
+        if (error?.status === 429 || error?.message?.includes('quota') || error?.message?.includes('rate limit')) {
+          if (attempt < RATE_LIMIT.maxRetries) {
+            const delay = RATE_LIMIT.baseDelay * Math.pow(2, attempt - 1);
+            console.log(`Rate limit hit for ${description}, waiting ${delay}ms before retry ${attempt + 1}/${RATE_LIMIT.maxRetries}`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          } else {
+            throw new Error(`Google Gemini API quota exceeded while generating ${description}. Please try again later.`);
+          }
+        }
+        
+        throw new Error(`Failed to generate ${description}`);
+      }
+    }
+    
+    throw lastError || new Error(`Failed to generate ${description} after all retries`);
+  }
+
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
-    
-    const languageInstructions = {
-      en: 'Respond in English.',
-      es: 'Responde en español.',
-      fr: 'Répondez en français.',
-      de: 'Antworten Sie auf Deutsch.',
-      it: 'Rispondi in italiano.',
-      pt: 'Responda em português.',
-      ru: 'Отвечайте на русском языке.',
-      ja: '日本語で回答してください。',
-      ko: '한국어로 답변해 주세요.',
-      zh: '请用中文回答。'
-    };
-
-    const languageInstruction = languageInstructions[language as keyof typeof languageInstructions] || languageInstructions.en;
-    
-    const lengthInstructions = {
-      short: 'Provide a concise summary in 2-3 sentences.',
-      medium: 'Provide a comprehensive summary in 1-2 paragraphs.',
-      detailed: 'Provide a detailed summary with multiple paragraphs covering all major points.'
-    };
-
-    const focusInstruction = focusAreas && focusAreas.length > 0 
-      ? `Pay special attention to these areas: ${focusAreas.join(', ')}.`
-      : '';
-
     // Generate main summary
-    const summaryPrompt = `${languageInstruction}\n\nAnalyze the following document and create a ${length} summary. ${lengthInstructions[length]} ${focusInstruction}\n\nDocument content:\n${content}`;
-    
-    const summaryResult = await model.generateContent(summaryPrompt);
-    const summaryResponse = await summaryResult.response;
-    const summary = summaryResponse.text();
+    const summaryPrompt = `${languageInstruction}\n\nAnalyze the following document and create a ${length} summary. ${lengthInstructions[length]} ${focusInstruction}\n\nDocument content:\n${truncatedContent}`;
+    const summary = await makeAICall(summaryPrompt, 'summary');
 
     // Generate key points
-    const keyPointsPrompt = `${languageInstruction}\n\nExtract 5-8 key points from the following document. Present them as clear, concise bullet points:\n\n${content}`;
-    
-    const keyPointsResult = await model.generateContent(keyPointsPrompt);
-    const keyPointsResponse = await keyPointsResult.response;
-    const keyPointsText = keyPointsResponse.text();
+    const keyPointsPrompt = `${languageInstruction}\n\nExtract 5-8 key points from the following document. Present them as clear, concise bullet points:\n\n${truncatedContent}`;
+    const keyPointsText = await makeAICall(keyPointsPrompt, 'key points');
     
     const keyPoints = keyPointsText
       .split('\n')
@@ -104,11 +174,8 @@ async function generateDocumentSummary(
       .slice(0, 8);
 
     // Generate insights
-    const insightsPrompt = `${languageInstruction}\n\nProvide 3-5 analytical insights about the document. Focus on implications, significance, and deeper understanding:\n\n${content}`;
-    
-    const insightsResult = await model.generateContent(insightsPrompt);
-    const insightsResponse = await insightsResult.response;
-    const insightsText = insightsResponse.text();
+    const insightsPrompt = `${languageInstruction}\n\nProvide 3-5 analytical insights about the document. Focus on implications, significance, and deeper understanding:\n\n${truncatedContent}`;
+    const insightsText = await makeAICall(insightsPrompt, 'insights');
     
     const insights = insightsText
       .split('\n')
@@ -124,7 +191,7 @@ async function generateDocumentSummary(
 
   } catch (error) {
     console.error('Error generating document summary:', error);
-    throw new Error('Failed to generate document summary');
+    throw error;
   }
 }
 
@@ -238,8 +305,20 @@ export async function POST(request: NextRequest) {
       message: 'Document summarized successfully'
     });
 
-  } catch (error) {
+  } catch (error: any) {
     console.error('Document summarization error:', error);
+    
+    if (error.message?.includes('quota exceeded') || error.status === 429) {
+      return NextResponse.json(
+        { 
+          error: 'Google Gemini API quota exceeded. Please try again later.',
+          message: error.message || 'Rate limit exceeded',
+          retryAfter: 60
+        },
+        { status: 429 }
+      );
+    }
+    
     return NextResponse.json(
       { 
         error: error instanceof Error ? error.message : 'Internal server error',

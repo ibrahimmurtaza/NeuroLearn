@@ -76,7 +76,7 @@ const Settings = () => {
   const { user } = useAuth();
   const [settings, setSettings] = useState<UserSettings>({
     profile: {
-      name: user?.name || '',
+      name: user?.user_metadata?.full_name || '',
       email: user?.email || '',
       timezone: 'UTC',
       language: 'en'
@@ -244,7 +244,7 @@ const Settings = () => {
       // Reset to default settings
       setSettings({
         profile: {
-          name: user?.name || '',
+          name: user?.user_metadata?.full_name || '',
           email: user?.email || '',
           timezone: 'UTC',
           language: 'en'

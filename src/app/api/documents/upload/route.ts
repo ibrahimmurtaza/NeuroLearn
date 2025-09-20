@@ -156,10 +156,11 @@ export async function POST(request: NextRequest) {
             filename: file.name,
             file_type: file.type,
             storage_path: storagePath,
+            content: textContent, // Store full text content in the new content column
             metadata: {
               size: file.size,
               originalName: file.name,
-              textContent: textContent.substring(0, 10000), // Store first 10k chars
+              textContent: textContent.substring(0, 10000), // Keep for backward compatibility
               extractedAt: new Date().toISOString()
             },
             processing_status: 'completed'

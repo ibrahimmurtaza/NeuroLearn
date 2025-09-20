@@ -34,14 +34,13 @@ async function getCachedTranslation(
       .eq('text_hash', textHash)
       .eq('source_language', sourceLanguage)
       .eq('target_language', targetLanguage)
-      .gt('expires_at', new Date().toISOString())
-      .single();
+      .gt('expires_at', new Date().toISOString());
 
     if (userId) {
       query = query.eq('user_id', userId);
     }
 
-    const { data, error } = await query;
+    const { data, error } = await query.single();
 
     if (error || !data) {
       return null;

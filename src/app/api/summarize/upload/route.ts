@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { v4 as uuidv4 } from 'uuid';
-import { UploadRequest, UploadResponse, ProcessingStatus } from '@/types/summarization';
+import { DocumentStatus } from '@/types/summarization';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -23,10 +23,9 @@ async function extractTextFromBuffer(buffer: Buffer, filename: string): Promise<
       case 'pptx':
         try {
           const pptx2json = await import('pptx2json');
-          const pptxParser = new pptx2json.default();
-          const pptData = await pptxParser.buffer2json(buffer);
+          const pptData = await pptx2json.default.toJson(buffer);
           
-          function extractTextFromXML(obj: any): string {
+          const extractTextFromXML = (obj: any): string => {
             let extractedText = '';
             
             if (typeof obj === 'string' && obj.trim().length > 0) {
@@ -239,7 +238,7 @@ export async function POST(request: NextRequest) {
         language,
         folder_id: folderId || null,
         user_id: userId,
-        processing_status: 'processing' as ProcessingStatus,
+        processing_status: 'processing',
         word_count: extractedText.split(/\s+/).length,
         character_count: extractedText.length
       })
@@ -274,10 +273,10 @@ export async function POST(request: NextRequest) {
     // Update document status to completed
     await supabase
       .from('documents')
-      .update({ processing_status: 'completed' as ProcessingStatus })
+      .update({ processing_status: 'ready' })
       .eq('id', documentId);
 
-    const response: UploadResponse = {
+    const response = {
       success: true,
       document: {
         id: document.id,
@@ -286,7 +285,7 @@ export async function POST(request: NextRequest) {
         fileType: document.file_type,
         fileSize: document.file_size,
         language: document.language,
-        processingStatus: 'completed' as ProcessingStatus,
+        processingStatus: 'ready',
         wordCount: document.word_count,
         characterCount: document.character_count,
         createdAt: document.created_at,

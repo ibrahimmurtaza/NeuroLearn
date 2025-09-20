@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react'
-import { VideoSummary, AudioSummary, ProcessingStatus, MediaChunk, KeyMoment } from '@/types/summarization'
+import { VideoSummary, AudioSummary, ProcessingStage, KeyMoment } from '@/types/summarization'
 
 interface VideoProcessingOptions {
   language: string
@@ -24,7 +24,7 @@ interface UseMediaProcessingReturn {
   audioSummaries: AudioSummary[]
   processing: boolean
   progress: number
-  status: ProcessingStatus | null
+  status: ProcessingStage | null
   error: string | null
   processVideo: (file: File, options: VideoProcessingOptions) => Promise<VideoSummary | null>
   processAudio: (file: File, options: AudioProcessingOptions) => Promise<AudioSummary | null>
@@ -45,7 +45,7 @@ export function useMediaProcessing(): UseMediaProcessingReturn {
   const [audioSummaries, setAudioSummaries] = useState<AudioSummary[]>([])
   const [processing, setProcessing] = useState(false)
   const [progress, setProgress] = useState(0)
-  const [status, setStatus] = useState<ProcessingStatus | null>(null)
+  const [status, setStatus] = useState<ProcessingStage | null>(null)
   const [error, setError] = useState<string | null>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
 
@@ -70,7 +70,7 @@ export function useMediaProcessing(): UseMediaProcessingReturn {
     setProcessing(true)
     setProgress(0)
     setError(null)
-    setStatus({ stage: 'uploading', message: 'Uploading video file...' })
+    setStatus('uploading')
 
     // Create abort controller for this request
     abortControllerRef.current = new AbortController()
@@ -123,11 +123,11 @@ export function useMediaProcessing(): UseMediaProcessingReturn {
               
               if (data.type === 'progress') {
                 setProgress(data.progress)
-                setStatus({ stage: data.stage, message: data.message })
+                setStatus(data.stage)
               } else if (data.type === 'complete') {
                 finalResult = data.result
                 setProgress(100)
-                setStatus({ stage: 'completed', message: 'Video processing completed!' })
+                setStatus('completed')
               } else if (data.type === 'error') {
                 throw new Error(data.error)
               }
@@ -167,7 +167,7 @@ export function useMediaProcessing(): UseMediaProcessingReturn {
     setProcessing(true)
     setProgress(0)
     setError(null)
-    setStatus({ stage: 'uploading', message: 'Uploading audio file...' })
+    setStatus('uploading')
 
     // Create abort controller for this request
     abortControllerRef.current = new AbortController()
@@ -220,11 +220,11 @@ export function useMediaProcessing(): UseMediaProcessingReturn {
               
               if (data.type === 'progress') {
                 setProgress(data.progress)
-                setStatus({ stage: data.stage, message: data.message })
+                setStatus(data.stage)
               } else if (data.type === 'complete') {
                 finalResult = data.result
                 setProgress(100)
-                setStatus({ stage: 'completed', message: 'Audio processing completed!' })
+                setStatus('completed')
               } else if (data.type === 'error') {
                 throw new Error(data.error)
               }

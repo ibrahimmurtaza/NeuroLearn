@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import OpenAI from 'openai';
 import { v4 as uuidv4 } from 'uuid';
-import { VideoProcessRequest, VideoProcessResponse, ProcessingStatus } from '@/types/summarization';
+import { DocumentStatus } from '@/types/summarization';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -14,6 +14,43 @@ const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY!);
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!
 });
+
+// Rate limiting configuration
+const RATE_LIMIT = {
+  requestsPerMinute: 15,
+  baseDelay: 2000, // 2 seconds
+  maxRetries: 3
+};
+
+// Rate limiter class
+class RateLimiter {
+  private requests: number[] = [];
+  
+  async waitIfNeeded(): Promise<void> {
+    const now = Date.now();
+    const oneMinuteAgo = now - 60000;
+    
+    // Remove requests older than 1 minute
+    this.requests = this.requests.filter(time => time > oneMinuteAgo);
+    
+    // If we're at the limit, wait
+    if (this.requests.length >= RATE_LIMIT.requestsPerMinute) {
+      const oldestRequest = Math.min(...this.requests);
+      const waitTime = oldestRequest + 60000 - now;
+      if (waitTime > 0) {
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      }
+    }
+    
+    // Add current request
+    this.requests.push(now);
+    
+    // Add base delay between requests
+    await new Promise(resolve => setTimeout(resolve, RATE_LIMIT.baseDelay));
+  }
+}
+
+const rateLimiter = new RateLimiter();
 
 // Video processing utilities
 async function extractAudioFromVideo(videoBuffer: Buffer, filename: string): Promise<Buffer> {
@@ -47,37 +84,66 @@ async function generateVideoSummary(
   summaryType: string,
   language: string = 'en'
 ): Promise<{ summary: string; keyPoints: string[]; timestamps?: string[] }> {
-  try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
-    
-    const languageInstructions = {
-      en: 'Respond in English.',
-      es: 'Responde en español.',
-      fr: 'Répondez en français.',
-      de: 'Antworten Sie auf Deutsch.',
-      it: 'Rispondi in italiano.',
-      pt: 'Responda em português.',
-      ru: 'Отвечайте на русском языке.',
-      ja: '日本語で回答してください。',
-      ko: '한국어로 답변해 주세요.',
-      zh: '请用中文回答。'
-    };
+  const languageInstructions = {
+    en: 'Respond in English.',
+    es: 'Responde en español.',
+    fr: 'Répondez en français.',
+    de: 'Antworten Sie auf Deutsch.',
+    it: 'Rispondi in italiano.',
+    pt: 'Responda em português.',
+    ru: 'Отвечайте на русском языке.',
+    ja: '日本語で回答してください。',
+    ko: '한국어로 답변해 주세요.',
+    zh: '请用中文回答。'
+  };
 
-    const languageInstruction = languageInstructions[language as keyof typeof languageInstructions] || languageInstructions.en;
+  const languageInstruction = languageInstructions[language as keyof typeof languageInstructions] || languageInstructions.en;
+  
+  // Truncate transcript if too long
+  const truncatedTranscript = transcript.length > 30000 ? transcript.substring(0, 30000) + '...' : transcript;
+
+  // Helper function for AI calls with retry logic
+  async function makeAICall(prompt: string, description: string): Promise<string> {
+    let lastError: any;
     
+    for (let attempt = 1; attempt <= RATE_LIMIT.maxRetries; attempt++) {
+      try {
+        await rateLimiter.waitIfNeeded();
+        
+        const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+        const result = await model.generateContent(prompt);
+        const response = await result.response;
+        return response.text();
+      } catch (error: any) {
+        lastError = error;
+        console.error(`${description} error (attempt ${attempt}):`, error);
+        
+        if (error?.status === 429 || error?.message?.includes('quota') || error?.message?.includes('rate limit')) {
+          if (attempt < RATE_LIMIT.maxRetries) {
+            const delay = RATE_LIMIT.baseDelay * Math.pow(2, attempt - 1);
+            console.log(`Rate limit hit for ${description}, waiting ${delay}ms before retry ${attempt + 1}/${RATE_LIMIT.maxRetries}`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          } else {
+            throw new Error(`Google Gemini API quota exceeded while generating ${description}. Please try again later.`);
+          }
+        }
+        
+        throw new Error(`Failed to generate ${description}`);
+      }
+    }
+    
+    throw lastError || new Error(`Failed to generate ${description} after all retries`);
+  }
+
+  try {
     // Generate summary
-    const summaryPrompt = `${languageInstruction}\n\nAnalyze the following video transcript and provide a ${summaryType} summary. Focus on the main topics, key insights, and important information discussed in the video:\n\n${transcript}`;
-    
-    const summaryResult = await model.generateContent(summaryPrompt);
-    const summaryResponse = await summaryResult.response;
-    const summary = summaryResponse.text();
+    const summaryPrompt = `${languageInstruction}\n\nAnalyze the following video transcript and provide a ${summaryType} summary. Focus on the main topics, key insights, and important information discussed in the video:\n\n${truncatedTranscript}`;
+    const summary = await makeAICall(summaryPrompt, 'video summary');
 
     // Generate key points
-    const keyPointsPrompt = `${languageInstruction}\n\nExtract 5-8 key points from the following video transcript. Return them as a simple list, one point per line, without numbering or bullet points:\n\n${transcript}`;
-    
-    const keyPointsResult = await model.generateContent(keyPointsPrompt);
-    const keyPointsResponse = await keyPointsResult.response;
-    const keyPointsText = keyPointsResponse.text();
+    const keyPointsPrompt = `${languageInstruction}\n\nExtract 5-8 key points from the following video transcript. Return them as a simple list, one point per line, without numbering or bullet points:\n\n${truncatedTranscript}`;
+    const keyPointsText = await makeAICall(keyPointsPrompt, 'key points');
     
     const keyPoints = keyPointsText
       .split('\n')
@@ -92,7 +158,7 @@ async function generateVideoSummary(
     };
   } catch (error) {
     console.error('Video summary generation error:', error);
-    throw new Error('Failed to generate video summary');
+    throw error;
   }
 }
 
@@ -175,7 +241,7 @@ export async function POST(request: NextRequest) {
         language,
         folder_id: folderId || null,
         user_id: userId,
-        processing_status: 'processing' as ProcessingStatus,
+        processing_status: 'processing',
         word_count: 0,
         character_count: 0
       })
@@ -199,7 +265,7 @@ export async function POST(request: NextRequest) {
       if (!transcript || transcript.length < 50) {
         await supabase
           .from('documents')
-          .update({ processing_status: 'failed' as ProcessingStatus })
+          .update({ processing_status: 'failed' })
           .eq('id', documentId);
 
         return NextResponse.json(
@@ -254,7 +320,7 @@ export async function POST(request: NextRequest) {
           key_points: keyPoints,
           language,
           word_count: summary.split(/\s+/).length,
-          processing_status: 'completed' as ProcessingStatus,
+          processing_status: 'ready',
           user_id: userId
         })
         .select()
@@ -281,10 +347,10 @@ export async function POST(request: NextRequest) {
       // Update document status to completed
       await supabase
         .from('documents')
-        .update({ processing_status: 'completed' as ProcessingStatus })
+        .update({ processing_status: 'ready' })
         .eq('id', documentId);
 
-      const response: VideoProcessResponse = {
+      const response = {
         success: true,
         document: {
           id: document.id,
@@ -293,7 +359,7 @@ export async function POST(request: NextRequest) {
           fileType: document.file_type,
           fileSize: document.file_size,
           language: document.language,
-          processingStatus: 'completed' as ProcessingStatus,
+          processingStatus: 'ready',
           wordCount: transcript.split(/\s+/).length,
           characterCount: transcript.length,
           createdAt: document.created_at,
@@ -318,14 +384,27 @@ export async function POST(request: NextRequest) {
 
       return NextResponse.json(response);
 
-    } catch (processingError) {
+    } catch (processingError: any) {
       // Update document status to failed
       await supabase
         .from('documents')
-        .update({ processing_status: 'failed' as ProcessingStatus })
+        .update({ processing_status: 'failed' })
         .eq('id', documentId);
 
       console.error('Video processing error:', processingError);
+      
+      if (processingError.message?.includes('rate limit') || processingError.message?.includes('quota exceeded')) {
+        return NextResponse.json(
+          { 
+            error: 'Google Gemini API quota exceeded. Please try again later.',
+            message: processingError.message,
+            details: processingError.message,
+            retryAfter: 60
+          },
+          { status: 429 }
+        );
+      }
+      
       return NextResponse.json(
         { error: 'Failed to process video file' },
         { status: 500 }

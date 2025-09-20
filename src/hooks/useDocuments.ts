@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react'
-import { Document, DocumentType, ProcessingStatus, Folder } from '@/types/summarization'
+import { Document, ProcessingStage, Folder } from '@/types/summarization'
 
 interface UploadOptions {
   folderId?: string
@@ -30,8 +30,8 @@ interface UseDocumentsReturn {
 }
 
 interface DocumentFilters {
-  type?: DocumentType
-  status?: ProcessingStatus
+  type?: string
+  status?: ProcessingStage
   dateFrom?: Date
   dateTo?: Date
   tags?: string[]
@@ -249,7 +249,7 @@ export function useDocuments(): UseDocumentsReturn {
       }
 
       setDocuments(prev => prev.map(doc => 
-        doc.id === documentId ? { ...doc, folder_id: folderId } : doc
+        doc.id === documentId ? { ...doc, folder_id: folderId || undefined } : doc
       ))
 
       return true
@@ -341,7 +341,7 @@ export function useDocuments(): UseDocumentsReturn {
       setFolders(prev => prev.filter(folder => folder.id !== folderId))
       // Move documents in deleted folder to root
       setDocuments(prev => prev.map(doc => 
-        doc.folder_id === folderId ? { ...doc, folder_id: null } : doc
+        doc.folder_id === folderId ? { ...doc, folder_id: undefined } : doc
       ))
       return true
     } catch (err) {

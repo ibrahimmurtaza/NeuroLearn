@@ -21,7 +21,9 @@ import {
   Share2,
   Edit3,
   Copy,
-  ExternalLink
+  ExternalLink,
+  ChevronUp,
+  ChevronDown
 } from 'lucide-react';
 
 interface SummaryItem {
@@ -39,7 +41,7 @@ interface SummaryItem {
 }
 
 const SummaryHistory = () => {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const [summaries, setSummaries] = useState<SummaryItem[]>([]);
   const [filteredSummaries, setFilteredSummaries] = useState<SummaryItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -49,17 +51,23 @@ const SummaryHistory = () => {
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
   const [showFilters, setShowFilters] = useState(false);
+  const [expandedSummaries, setExpandedSummaries] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const fetchSummaries = async () => {
+      // Don't fetch if still loading auth or no user
+      if (authLoading || !user) {
+        setIsLoading(false);
+        return;
+      }
+
       try {
-        // Get user ID from auth context
-        const userId = user?.id || 'demo-user'; // Fallback for demo purposes
+        setIsLoading(true);
         
-        const response = await fetch(`/api/summarize/history?userId=${userId}&limit=50&sortBy=created_at&sortOrder=desc`);
+        const response = await fetch(`/api/summarize/history?userId=${user.id}&limit=50&sortBy=created_at&sortOrder=desc`);
         
         if (!response.ok) {
-          throw new Error('Failed to fetch summaries');
+          throw new Error(`HTTP error! status: ${response.status}`);
         }
         
         const data = await response.json();
@@ -75,16 +83,16 @@ const SummaryHistory = () => {
             updatedAt: item.updatedAt,
             wordCount: item.wordCount,
             rating: undefined, // Not available in API response
-            tags: [], // Could be extracted from metadata if available
+            tags: item.tags || [], // Now available from API
             status: item.processingStatus === 'completed' ? 'completed' : 
                    item.processingStatus === 'processing' ? 'processing' : 'failed',
-            originalSource: item.documentTitle
+            originalSource: item.documentTitle || 'Unknown',
           }));
           
           setSummaries(transformedSummaries);
           setFilteredSummaries(transformedSummaries);
         } else {
-          // If no summaries found, set empty arrays
+          // If no summaries found or API returned error, set empty arrays
           setSummaries([]);
           setFilteredSummaries([]);
         }
@@ -99,7 +107,7 @@ const SummaryHistory = () => {
     };
 
     fetchSummaries();
-  }, []);
+  }, [user, authLoading]); // Added dependencies
 
   useEffect(() => {
     let filtered = summaries.filter(summary => {
@@ -166,6 +174,18 @@ const SummaryHistory = () => {
     );
   };
 
+  const toggleSummaryExpansion = (summaryId: string) => {
+    setExpandedSummaries(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(summaryId)) {
+        newSet.delete(summaryId);
+      } else {
+        newSet.add(summaryId);
+      }
+      return newSet;
+    });
+  };
+
   const handleExport = (format: 'pdf' | 'docx' | 'txt') => {
     console.log(`Exporting ${selectedItems.length} items as ${format}`);
     // Implementation for export functionality
@@ -181,7 +201,8 @@ const SummaryHistory = () => {
     });
   };
 
-  if (isLoading) {
+  // Show loading state while auth is loading
+  if (authLoading || isLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 p-4">
         <div className="max-w-7xl mx-auto">
@@ -195,6 +216,26 @@ const SummaryHistory = () => {
                 ))}
               </div>
             </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Show message if not authenticated
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 p-4">
+        <div className="max-w-7xl mx-auto">
+          <div className="bg-white rounded-lg p-8 text-center">
+            <h2 className="text-2xl font-bold text-gray-900 mb-4">Authentication Required</h2>
+            <p className="text-gray-600 mb-6">Please log in to view your summary history.</p>
+            <Link
+              href="/auth/login"
+              className="inline-flex items-center px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              Log In
+            </Link>
           </div>
         </div>
       </div>
@@ -386,7 +427,40 @@ const SummaryHistory = () => {
                         </div>
                       </div>
                       
-                      <p className="text-gray-600 mb-3 line-clamp-2">{summary.content}</p>
+                      {/* Source Document */}
+                      {summary.originalSource && (
+                        <div className="mb-3 p-3 bg-blue-50 border-l-4 border-blue-400 rounded-r">
+                          <div className="flex items-center gap-2">
+                            <ExternalLink className="h-4 w-4 text-blue-600" />
+                            <span className="text-sm font-medium text-blue-800">Source Document:</span>
+                            <span className="text-sm text-blue-700">{summary.originalSource}</span>
+                          </div>
+                        </div>
+                      )}
+                      
+                      <div className="text-gray-600 mb-3">
+                        <p className={expandedSummaries.has(summary.id) ? '' : 'line-clamp-2'}>
+                          {summary.content}
+                        </p>
+                        {summary.content.length > 200 && (
+                          <button
+                            onClick={() => toggleSummaryExpansion(summary.id)}
+                            className="text-blue-600 hover:text-blue-800 text-sm font-medium mt-1 flex items-center gap-1"
+                          >
+                            {expandedSummaries.has(summary.id) ? (
+                              <>
+                                <ChevronUp className="h-3 w-3" />
+                                Show less
+                              </>
+                            ) : (
+                              <>
+                                <ChevronDown className="h-3 w-3" />
+                                Show more
+                              </>
+                            )}
+                          </button>
+                        )}
+                      </div>
                       
                       <div className="flex items-center justify-between">
                         <div className="flex gap-2">
@@ -400,12 +474,7 @@ const SummaryHistory = () => {
                           ))}
                         </div>
                         
-                        {summary.originalSource && (
-                          <div className="text-xs text-gray-500 flex items-center gap-1">
-                            <ExternalLink className="h-3 w-3" />
-                            <span className="truncate max-w-xs">{summary.originalSource}</span>
-                          </div>
-                        )}
+
                       </div>
                     </div>
                   </div>

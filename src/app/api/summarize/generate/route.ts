@@ -9,41 +9,82 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY!);
+const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY!);
+
+// Rate limiting configuration
+const RATE_LIMIT = {
+  requestsPerMinute: 15,
+  delayBetweenRequests: 4000, // 4 seconds
+  maxRetries: 3,
+  baseDelay: 2000 // 2 seconds
+};
+
+// Simple rate limiter
+class RateLimiter {
+  private requests: number[] = [];
+  
+  async waitIfNeeded(): Promise<void> {
+    const now = Date.now();
+    const oneMinuteAgo = now - 60000;
+    
+    // Remove old requests
+    this.requests = this.requests.filter(time => time > oneMinuteAgo);
+    
+    // Check if we need to wait
+    if (this.requests.length >= RATE_LIMIT.requestsPerMinute) {
+      const oldestRequest = Math.min(...this.requests);
+      const waitTime = oldestRequest + 60000 - now;
+      if (waitTime > 0) {
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      }
+    }
+    
+    // Add current request
+    this.requests.push(now);
+    
+    // Add delay between requests
+    await new Promise(resolve => setTimeout(resolve, RATE_LIMIT.delayBetweenRequests));
+  }
+}
+
+const rateLimiter = new RateLimiter();
 
 // Summary prompts for different types
 const SUMMARY_PROMPTS = {
-  brief: `Provide a concise summary of the following text in 2-3 sentences. Focus on the main points and key takeaways:\n\n`,
-  detailed: `Provide a comprehensive summary of the following text. Include:
+  short: `Provide a concise summary of the following text in 2-3 sentences. Focus on the main points and key takeaways:\n\n`,
+  medium: `Provide a balanced summary of the following text. Include:
 - Main themes and arguments
 - Key supporting points
-- Important details and examples
+- Important details
 - Conclusions or recommendations
 
 Text:\n\n`,
-  bullet_points: `Create a bullet-point summary of the following text. Organize the information into clear, concise bullet points that capture:
-- Main ideas
-- Key facts
-- Important details
-- Action items (if any)
+  detailed: `Provide a comprehensive and thorough summary of the following text. Include:
+- Complete overview of all main themes
+- Detailed analysis of key arguments
+- Supporting evidence and examples
+- Methodology (if applicable)
+- Conclusions and implications
+- Recommendations or next steps
 
 Text:\n\n`,
-  executive: `Create an executive summary of the following text. Structure it as:
-- Executive Overview (2-3 sentences)
-- Key Findings
-- Recommendations
-- Next Steps (if applicable)
+  brief: `Provide a very brief summary of the following text in 1-2 sentences. Focus only on the most essential point:\n\n`,
+  bullet_points: `Summarize the following text as a list of bullet points. Each point should capture a key idea or important detail:\n\n`,
+  executive: `Provide an executive summary of the following text suitable for business leaders. Include:
+- Key findings and insights
+- Strategic implications
+- Actionable recommendations
+- Business impact
 
 Text:\n\n`,
   academic: `Provide an academic-style summary of the following text. Include:
-- Abstract/Overview
-- Main arguments and thesis
-- Methodology (if applicable)
-- Key findings
-- Conclusions and implications
+- Research objectives and methodology
+- Key findings and evidence
+- Theoretical implications
+- Limitations and future research directions
 
 Text:\n\n`,
-  custom: `Summarize the following text according to these specific requirements: {customPrompt}\n\nText:\n\n`
+  custom: `Provide a comprehensive summary of the following text:\n\n`
 };
 
 // Language-specific instructions
@@ -64,48 +105,101 @@ async function generateSummaryWithAI(
   text: string,
   summaryType: SummaryType,
   language: string = 'en',
-  customPrompt?: string
+  documentTitle?: string
 ): Promise<string> {
-  try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
-    
-    let prompt = SUMMARY_PROMPTS[summaryType];
-    if (summaryType === 'custom' && customPrompt) {
-      prompt = prompt.replace('{customPrompt}', customPrompt);
+  let lastError: any;
+  
+  for (let attempt = 1; attempt <= RATE_LIMIT.maxRetries; attempt++) {
+    try {
+      // Apply rate limiting
+      await rateLimiter.waitIfNeeded();
+      
+      const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+      
+      // Truncate content if too long (max ~30k chars to stay within token limits)
+      const truncatedText = text.length > 30000 ? text.substring(0, 30000) + '...' : text;
+      
+      const prompt = SUMMARY_PROMPTS[summaryType];
+      const languageInstruction = LANGUAGE_INSTRUCTIONS[language as keyof typeof LANGUAGE_INSTRUCTIONS] || LANGUAGE_INSTRUCTIONS.en;
+      const titleInstruction = documentTitle ? `Start your summary with the document title "${documentTitle}" for proper attribution and context.\n\n` : '';
+      const fullPrompt = `${languageInstruction}\n\n${titleInstruction}${prompt}${documentTitle ? `\n\nDocument Title: ${documentTitle}\n\nDocument Content:\n` : ''}${truncatedText}`;
+      
+      const result = await model.generateContent(fullPrompt);
+      const response = await result.response;
+      return response.text();
+    } catch (error: any) {
+      lastError = error;
+      console.error(`AI generation error (attempt ${attempt}):`, error);
+      
+      // Check if it's a quota/rate limit error
+      if (error?.status === 429 || error?.message?.includes('quota') || error?.message?.includes('rate limit')) {
+        if (attempt < RATE_LIMIT.maxRetries) {
+          const delay = RATE_LIMIT.baseDelay * Math.pow(2, attempt - 1); // Exponential backoff
+          console.log(`Rate limit hit, waiting ${delay}ms before retry ${attempt + 1}/${RATE_LIMIT.maxRetries}`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        } else {
+          throw new Error('Google Gemini API quota exceeded. Please try again later.');
+        }
+      }
+      
+      // For other errors, don't retry
+      throw new Error('Failed to generate summary with AI');
     }
-    
-    const languageInstruction = LANGUAGE_INSTRUCTIONS[language as keyof typeof LANGUAGE_INSTRUCTIONS] || LANGUAGE_INSTRUCTIONS.en;
-    const fullPrompt = `${languageInstruction}\n\n${prompt}${text}`;
-    
-    const result = await model.generateContent(fullPrompt);
-    const response = await result.response;
-    return response.text();
-  } catch (error) {
-    console.error('AI generation error:', error);
-    throw new Error('Failed to generate summary with AI');
   }
+  
+  throw lastError || new Error('Failed to generate summary after all retries');
 }
 
 async function generateKeyPoints(text: string, language: string = 'en'): Promise<string[]> {
-  try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
-    const languageInstruction = LANGUAGE_INSTRUCTIONS[language as keyof typeof LANGUAGE_INSTRUCTIONS] || LANGUAGE_INSTRUCTIONS.en;
-    
-    const prompt = `${languageInstruction}\n\nExtract 5-8 key points from the following text. Return them as a simple list, one point per line, without numbering or bullet points:\n\n${text}`;
-    
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const keyPointsText = response.text();
-    
-    return keyPointsText
-      .split('\n')
-      .map(point => point.trim())
-      .filter(point => point.length > 0)
-      .slice(0, 8); // Limit to 8 key points
-  } catch (error) {
-    console.error('Key points generation error:', error);
-    return [];
+  let lastError: any;
+  
+  for (let attempt = 1; attempt <= RATE_LIMIT.maxRetries; attempt++) {
+    try {
+      // Apply rate limiting
+      await rateLimiter.waitIfNeeded();
+      
+      const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+      const languageInstruction = LANGUAGE_INSTRUCTIONS[language as keyof typeof LANGUAGE_INSTRUCTIONS] || LANGUAGE_INSTRUCTIONS.en;
+      
+      // Truncate content if too long
+      const truncatedText = text.length > 30000 ? text.substring(0, 30000) + '...' : text;
+      
+      const prompt = `${languageInstruction}\n\nExtract 5-8 key points from the following text. Return them as a simple list, one point per line, without numbering or bullet points:\n\n${truncatedText}`;
+      
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+      const keyPointsText = response.text();
+      
+      return keyPointsText
+        .split('\n')
+        .map(point => point.trim())
+        .filter(point => point.length > 0)
+        .slice(0, 8); // Limit to 8 key points
+    } catch (error: any) {
+      lastError = error;
+      console.error(`Key points generation error (attempt ${attempt}):`, error);
+      
+      // Check if it's a quota/rate limit error
+      if (error?.status === 429 || error?.message?.includes('quota') || error?.message?.includes('rate limit')) {
+        if (attempt < RATE_LIMIT.maxRetries) {
+          const delay = RATE_LIMIT.baseDelay * Math.pow(2, attempt - 1);
+          console.log(`Rate limit hit for key points, waiting ${delay}ms before retry ${attempt + 1}/${RATE_LIMIT.maxRetries}`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        } else {
+          console.error('Key points generation failed due to quota limits, returning empty array');
+          return [];
+        }
+      }
+      
+      // For other errors, return empty array
+      console.error('Key points generation failed:', error);
+      return [];
+    }
   }
+  
+  return [];
 }
 
 export async function POST(request: NextRequest) {
@@ -113,8 +207,8 @@ export async function POST(request: NextRequest) {
     const body: GenerateSummaryRequest = await request.json();
     console.log('Received request body:', JSON.stringify(body, null, 2));
     
-    const { documentId, summaryType, language = 'en', customPrompt, userId } = body;
-    console.log('Extracted values:', { documentId, summaryType, language, customPrompt, userId });
+    const { documentId, summaryType, language = 'en', userId } = body;
+    console.log('Extracted values:', { documentId, summaryType, language, userId });
 
     // Input validation
     if (!documentId || !summaryType || !userId) {
@@ -139,10 +233,10 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate summary type
-    const validSummaryTypes = ['brief', 'detailed', 'bullet_points', 'executive', 'academic', 'custom'];
+    const validSummaryTypes = ['short', 'medium', 'detailed', 'brief', 'bullet_points', 'executive', 'academic', 'custom'];
     if (!validSummaryTypes.includes(summaryType)) {
       return NextResponse.json(
-        { error: 'Invalid summary type. Must be one of: brief, detailed, bullet_points, executive, academic, custom' },
+        { error: 'Invalid summary type. Must be one of: short, medium, detailed, brief, bullet_points, executive, academic, custom' },
         { status: 400 }
       );
     }
@@ -156,13 +250,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Validate custom prompt length
-    if (customPrompt && customPrompt.length > 1000) {
-      return NextResponse.json(
-        { error: 'Custom prompt must be less than 1000 characters' },
-        { status: 400 }
-      );
-    }
+
 
     // Fetch document
     console.log('Fetching document with ID:', documentId, 'for user:', userId);
@@ -190,7 +278,7 @@ export async function POST(request: NextRequest) {
     const { data: existingSummary } = await supabase
       .from('summaries')
       .select('*')
-      .eq('document_id', documentId)
+      .eq('user_id', userId)
       .eq('summary_type', summaryType)
       .eq('language', language)
       .single();
@@ -200,13 +288,13 @@ export async function POST(request: NextRequest) {
         success: true,
         summary: {
           id: existingSummary.id,
-          documentId: existingSummary.document_id,
+          documentId: documentId,
           summaryType: existingSummary.summary_type,
           content: existingSummary.content,
-          keyPoints: existingSummary.key_points || [],
+          keyPoints: [],
           language: existingSummary.language,
-          wordCount: existingSummary.word_count,
-          processingStatus: existingSummary.processing_status,
+          wordCount: existingSummary.content ? existingSummary.content.split(/\s+/).length : 0,
+          processingStatus: 'ready',
           createdAt: existingSummary.created_at,
           updatedAt: existingSummary.updated_at
         }
@@ -219,11 +307,11 @@ export async function POST(request: NextRequest) {
       .from('summaries')
       .insert({
         id: summaryId,
-        document_id: documentId,
+        user_id: userId,
+        title: `${summaryType} summary`,
+        content: '',
         summary_type: summaryType,
-        language,
-        processing_status: 'processing',
-        user_id: userId
+        language: language || 'en'
       });
 
     if (createError) {
@@ -235,25 +323,41 @@ export async function POST(request: NextRequest) {
     }
 
     try {
+      // Extract text content from document metadata
+      const documentContent = document.metadata?.textContent || '';
+      
+      if (!documentContent) {
+        console.error('No text content found in document metadata');
+        return NextResponse.json(
+          { error: 'Document has no extractable text content' },
+          { status: 400 }
+        );
+      }
+
+      console.log('Document content length:', documentContent.length);
+      console.log('Document content preview:', documentContent.substring(0, 200));
+      
       // Generate summary content
+      console.log('Starting AI summary generation...');
       const summaryContent = await generateSummaryWithAI(
-        document.content,
+        documentContent,
         summaryType,
         language,
-        customPrompt
+        document.filename
       );
+      console.log('Summary generated, length:', summaryContent.length);
+      console.log('Summary content preview:', summaryContent.substring(0, 200));
 
       // Generate key points
-      const keyPoints = await generateKeyPoints(document.content, language);
+      console.log('Starting key points generation...');
+      const keyPoints = await generateKeyPoints(documentContent, language);
+      console.log('Key points generated:', keyPoints.length, 'points');
 
       // Update summary with generated content
       const { data: updatedSummary, error: updateError } = await supabase
         .from('summaries')
         .update({
-          content: summaryContent,
-          key_points: keyPoints,
-          word_count: summaryContent.split(/\s+/).length,
-          processing_status: 'completed'
+          content: summaryContent
         })
         .eq('id', summaryId)
         .select()
@@ -267,28 +371,19 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // Create summary sources record
-      await supabase
-        .from('summary_sources')
-        .insert({
-          id: uuidv4(),
-          summary_id: summaryId,
-          document_id: documentId,
-          source_type: 'document',
-          relevance_score: 1.0
-        });
+      // Summary created successfully
 
       const response: GenerateSummaryResponse = {
         success: true,
         summary: {
           id: updatedSummary.id,
-          documentId: updatedSummary.document_id,
+          documentId: documentId,
           summaryType: updatedSummary.summary_type,
           content: updatedSummary.content,
-          keyPoints: updatedSummary.key_points || [],
+          keyPoints: keyPoints || [],
           language: updatedSummary.language,
-          wordCount: updatedSummary.word_count,
-          processingStatus: updatedSummary.processing_status,
+          wordCount: summaryContent.split(/\s+/).length,
+          processingStatus: 'ready',
           createdAt: updatedSummary.created_at,
           updatedAt: updatedSummary.updated_at
         }
@@ -297,12 +392,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(response);
 
     } catch (aiError) {
-      // Update summary status to failed
-      await supabase
-        .from('summaries')
-        .update({ processing_status: 'failed' })
-        .eq('id', summaryId);
-
+      // Log AI processing error
       console.error('AI processing error:', aiError);
       return NextResponse.json(
         { error: 'Failed to generate summary' },
@@ -337,7 +427,6 @@ export async function GET(request: NextRequest) {
     let query = supabase
       .from('summaries')
       .select('*')
-      .eq('document_id', documentId)
       .eq('user_id', userId)
       .order('created_at', { ascending: false });
 
@@ -385,17 +474,15 @@ export async function PUT(request: NextRequest) {
     }
 
     const { data: updatedSummary, error: updateError } = await supabase
-      .from('summaries')
-      .update({
-        content: content,
-        key_points: keyPoints,
-        word_count: content ? content.split(/\s+/).length : 0,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', summaryId)
-      .eq('user_id', userId)
-      .select()
-      .single();
+        .from('summaries')
+        .update({
+          content: content,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', summaryId)
+        .eq('user_id', userId)
+        .select()
+        .single();
 
     if (updateError) {
       console.error('Error updating summary:', updateError);
@@ -409,13 +496,13 @@ export async function PUT(request: NextRequest) {
       success: true,
       summary: {
         id: updatedSummary.id,
-        documentId: updatedSummary.document_id,
+        documentId: null,
         summaryType: updatedSummary.summary_type,
         content: updatedSummary.content,
-        keyPoints: updatedSummary.key_points || [],
+        keyPoints: [],
         language: updatedSummary.language,
-        wordCount: updatedSummary.word_count,
-        processingStatus: updatedSummary.processing_status,
+        wordCount: updatedSummary.content ? updatedSummary.content.split(/\s+/).length : 0,
+        processingStatus: 'ready',
         createdAt: updatedSummary.created_at,
         updatedAt: updatedSummary.updated_at
       }
@@ -441,12 +528,6 @@ export async function DELETE(request: NextRequest) {
         { status: 400 }
       );
     }
-
-    // Delete summary sources first
-    await supabase
-      .from('summary_sources')
-      .delete()
-      .eq('summary_id', summaryId);
 
     // Delete the summary
     const { error: deleteError } = await supabase

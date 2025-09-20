@@ -118,7 +118,7 @@ async function generateAudioSummary(
 
     // Try to identify speakers (basic implementation)
     const speakerPattern = /\b(?:Speaker|Host|Guest|Interviewer|Interviewee|Participant)\s*[A-Z]?\d*\b/gi;
-    const speakers = [...new Set(transcript.match(speakerPattern) || [])];
+    const speakers = Array.from(new Set(transcript.match(speakerPattern) || []));
 
     return {
       summary,
@@ -213,7 +213,7 @@ export async function POST(request: NextRequest) {
         language,
         folder_id: folderId || null,
         user_id: userId,
-        processing_status: 'processing' as ProcessingStatus,
+        processing_status: 'processing',
         word_count: 0,
         character_count: 0
       })
@@ -236,7 +236,7 @@ export async function POST(request: NextRequest) {
       if (!transcript || transcript.length < 50) {
         await supabase
           .from('documents')
-          .update({ processing_status: 'failed' as ProcessingStatus })
+          .update({ processing_status: 'error' })
           .eq('id', documentId);
 
         return NextResponse.json(
@@ -292,7 +292,7 @@ export async function POST(request: NextRequest) {
           key_points: keyPoints,
           language,
           word_count: summary.split(/\s+/).length,
-          processing_status: 'completed' as ProcessingStatus,
+          processing_status: 'completed',
           user_id: userId,
           metadata: speakers ? { speakers } : null
         })
@@ -320,7 +320,7 @@ export async function POST(request: NextRequest) {
       // Update document status to completed
       await supabase
         .from('documents')
-        .update({ processing_status: 'completed' as ProcessingStatus })
+        .update({ processing_status: 'ready' })
         .eq('id', documentId);
 
       const response: AudioProcessResponse = {
@@ -332,7 +332,7 @@ export async function POST(request: NextRequest) {
           fileType: document.file_type,
           fileSize: document.file_size,
           language: document.language,
-          processingStatus: 'completed' as ProcessingStatus,
+          processingStatus: 'ready',
           wordCount: transcript.split(/\s+/).length,
           characterCount: transcript.length,
           createdAt: document.created_at,
@@ -362,7 +362,7 @@ export async function POST(request: NextRequest) {
       // Update document status to failed
       await supabase
         .from('documents')
-        .update({ processing_status: 'failed' as ProcessingStatus })
+        .update({ processing_status: 'error' })
         .eq('id', documentId);
 
       console.error('Audio processing error:', processingError);

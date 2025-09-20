@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { v4 as uuidv4 } from 'uuid';
-import { NotesGenerationRequest, NotesGenerationResponse, FlashcardGenerationRequest, FlashcardGenerationResponse } from '@/types/summarization';
+import { NotesGenerationRequest, NotesGenerationResponse, FlashcardsGenerationRequest, FlashcardsGenerationResponse } from '@/types/summarization';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -170,7 +170,7 @@ export async function POST(request: NextRequest) {
       const {
         documentIds,
         summaryIds,
-        notesType = 'detailed',
+        notesType = 'outline',
         language = 'en',
         subject,
         userId
@@ -289,7 +289,7 @@ export async function POST(request: NextRequest) {
         language = 'en',
         subject,
         userId
-      }: FlashcardGenerationRequest = body;
+      }: FlashcardsGenerationRequest = body;
 
       if (!userId || (!documentIds?.length && !summaryIds?.length)) {
         return NextResponse.json(
@@ -364,7 +364,7 @@ export async function POST(request: NextRequest) {
         .filter(result => !result.error)
         .map(result => result.data);
 
-      const response: FlashcardGenerationResponse = {
+      const response: FlashcardsGenerationResponse = {
         success: true,
         flashcards: savedFlashcards.map(flashcard => ({
           id: flashcard.id,

@@ -2,8 +2,9 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
-import { Upload, FileText, Search, Filter, Grid, List, Download, Trash2, Eye, CheckSquare, Square, Plus } from 'lucide-react'
+import { Upload, FileText, Search, Filter, Grid, List, Download, Trash2, Eye, CheckSquare, Square, Plus, Brain } from 'lucide-react'
 import Link from 'next/link'
+import FlashcardModal from '@/components/FlashcardModal'
 
 interface Document {
   id: string
@@ -52,7 +53,11 @@ export default function DocumentSummary() {
     language: 'en',
     customPrompt: ''
   })
+  const [isProcessing, setIsProcessing] = useState(false)
+  const [processingProgress, setProcessingProgress] = useState({ current: 0, total: 0, currentDoc: '' })
+  const [notification, setNotification] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null)
   const [showBatchSummary, setShowBatchSummary] = useState(false)
+  const [showFlashcardModal, setShowFlashcardModal] = useState(false)
   const hasFetchedRef = useRef(false)
 
   useEffect(() => {
@@ -180,11 +185,43 @@ export default function DocumentSummary() {
     if (selectedDocs.size === 0) return
     
     if (!user?.id) {
-      alert('Please log in to summarize documents')
+      setNotification({ type: 'error', message: 'Please log in to summarize documents' })
       return
     }
-    
+
+    setIsProcessing(true)
+    const selectedDocuments = documents.filter(doc => selectedDocs.has(doc.id))
+    setProcessingProgress({ current: 0, total: selectedDocuments.length, currentDoc: 'Preparing documents...' })
+    setNotification({ type: 'info', message: `Starting batch summarization of ${selectedDocuments.length} documents...` })
+
     try {
+      // Map length option to correct summaryType
+      const getSummaryType = (length: string) => {
+        switch (length) {
+          case 'short': return 'brief';
+          case 'medium': return 'medium';
+          case 'detailed': return 'detailed';
+          default: return 'medium';
+        }
+      };
+
+      // Show progress for each document being processed
+      for (let i = 0; i < selectedDocuments.length; i++) {
+        setProcessingProgress({ 
+          current: i, 
+          total: selectedDocuments.length, 
+          currentDoc: `Processing "${selectedDocuments[i].name || selectedDocuments[i].title || `Document ${i + 1}`}"...` 
+        })
+        // Small delay to show progress
+        await new Promise(resolve => setTimeout(resolve, 100))
+      }
+      
+      setProcessingProgress({ 
+        current: selectedDocuments.length, 
+        total: selectedDocuments.length, 
+        currentDoc: 'Generating summaries...' 
+      })
+
       const response = await fetch('/api/summarize/batch', {
         method: 'POST',
         headers: {
@@ -193,7 +230,7 @@ export default function DocumentSummary() {
         body: JSON.stringify({
           documentIds: Array.from(selectedDocs),
           options: {
-            summaryType: 'detailed',
+            summaryType: getSummaryType(summaryOptions.length || 'medium'),
             language: 'en',
             length: summaryOptions.length || 'medium',
             focusArea: (summaryOptions.focus || 'general').replace('-', '_')
@@ -204,17 +241,35 @@ export default function DocumentSummary() {
       
       if (response.ok) {
         const result = await response.json()
-        alert(`Batch summarization completed! Generated ${result.metadata.successfulSummaries} summaries.`)
+        const { successfulSummaries, failedSummaries, totalDocuments } = result.metadata
+        
+        if (successfulSummaries > 0) {
+          setNotification({ 
+            type: 'success', 
+            message: `Successfully generated ${successfulSummaries} summaries${failedSummaries > 0 ? ` (${failedSummaries} failed)` : ''}!` 
+          })
+        } else {
+          setNotification({ type: 'error', message: 'Failed to generate any summaries. Please try again.' })
+        }
+        
         setSelectedDocs(new Set())
         setShowBatchSummary(false)
         await fetchDocuments()
+        
+        // Redirect to analysis page after a short delay
+        setTimeout(() => {
+          window.location.href = '/summarize/analysis'
+        }, 2000)
       } else {
         const error = await response.json()
-        alert(`Failed to generate summaries: ${error.error || 'Unknown error'}`)
+        setNotification({ type: 'error', message: `Failed to generate summaries: ${error.error || 'Unknown error'}` })
       }
     } catch (error) {
       console.error('Error starting batch summarization:', error)
-      alert('Failed to start batch summarization. Please try again.')
+      setNotification({ type: 'error', message: 'Failed to start batch summarization. Please try again.' })
+    } finally {
+      setIsProcessing(false)
+      setProcessingProgress({ current: 0, total: 0, currentDoc: '' })
     }
   }
 
@@ -261,7 +316,7 @@ export default function DocumentSummary() {
         <div className="mb-8">
           <div className="flex items-center space-x-3 mb-4">
             <Link href="/summarize" className="text-green-600 hover:text-green-800 transition-colors">
-              ← Back to Dashboard
+              &larr; Back to Dashboard
             </Link>
           </div>
           <div className="flex items-center justify-between">
@@ -280,13 +335,22 @@ export default function DocumentSummary() {
             </div>
             
             {selectedDocs.size > 0 && (
-              <button
-                onClick={() => setShowBatchSummary(true)}
-                className="bg-gradient-to-r from-green-500 to-green-600 text-white px-6 py-3 rounded-xl font-medium hover:from-green-600 hover:to-green-700 transition-all flex items-center space-x-2"
-              >
-                <Plus className="h-5 w-5" />
-                <span>Summarize Selected ({selectedDocs.size})</span>
-              </button>
+              <div className="flex items-center space-x-3">
+                <button
+                  onClick={() => setShowBatchSummary(true)}
+                  className="bg-gradient-to-r from-green-500 to-green-600 text-white px-6 py-3 rounded-xl font-medium hover:from-green-600 hover:to-green-700 transition-all flex items-center space-x-2"
+                >
+                  <Plus className="h-5 w-5" />
+                  <span>Summarize Selected ({selectedDocs.size})</span>
+                </button>
+                <button
+                  onClick={() => setShowFlashcardModal(true)}
+                  className="bg-gradient-to-r from-purple-500 to-purple-600 text-white px-6 py-3 rounded-xl font-medium hover:from-purple-600 hover:to-purple-700 transition-all flex items-center space-x-2"
+                >
+                  <Brain className="h-5 w-5" />
+                  <span>Generate Flashcards ({selectedDocs.size})</span>
+                </button>
+              </div>
             )}
           </div>
         </div>
@@ -483,11 +547,11 @@ export default function DocumentSummary() {
                 <div className="space-y-2 text-sm text-gray-500 dark:text-gray-400">
                   <div className="flex justify-between">
                     <span>Size:</span>
-                    <span>{formatFileSize(doc.size)}</span>
+                    <span>{formatFileSize(doc.size || 0)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span>Uploaded:</span>
-                    <span>{new Date(doc.uploadDate).toLocaleDateString()}</span>
+                    <span>{new Date(doc.uploadDate || new Date()).toLocaleDateString()}</span>
                   </div>
                   <div className="flex justify-between">
                     <span>Status:</span>
@@ -503,6 +567,11 @@ export default function DocumentSummary() {
                 
                 {doc.summary && (
                   <div className="mt-4 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                    <div className="mb-2 pb-2 border-b border-gray-200 dark:border-gray-600">
+                      <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-200">
+                        Summary: {doc.name}
+                      </h4>
+                    </div>
                     <p className="text-sm text-gray-700 dark:text-gray-300 line-clamp-3">
                       {doc.summary}
                     </p>
@@ -524,6 +593,25 @@ export default function DocumentSummary() {
         )
         )}
 
+        {/* Notification */}
+        {notification && (
+          <div className={`fixed top-4 right-4 z-50 p-4 rounded-lg shadow-lg max-w-md ${
+            notification.type === 'success' ? 'bg-green-500 text-white' :
+            notification.type === 'error' ? 'bg-red-500 text-white' :
+            'bg-blue-500 text-white'
+          }`}>
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-medium">{notification.message}</p>
+              <button
+                onClick={() => setNotification(null)}
+                className="ml-4 text-white hover:text-gray-200"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Batch Summary Modal */}
         {showBatchSummary && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -534,6 +622,31 @@ export default function DocumentSummary() {
               <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
                 Create focused summaries from selected documents using retrieval-based analysis
               </p>
+              
+              {/* Processing Progress */}
+               {isProcessing && (
+                 <div className="mb-4 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                   <div className="flex items-center space-x-3 mb-2">
+                     <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-500"></div>
+                     <span className="text-sm font-medium text-blue-700 dark:text-blue-300">
+                       {processingProgress.currentDoc || 'Processing documents...'}
+                     </span>
+                   </div>
+                   {processingProgress.total > 0 && (
+                     <>
+                       <div className="w-full bg-blue-200 dark:bg-blue-800 rounded-full h-2 mb-2">
+                         <div 
+                           className="bg-blue-500 h-2 rounded-full transition-all duration-300"
+                           style={{ width: `${(processingProgress.current / processingProgress.total) * 100}%` }}
+                         ></div>
+                       </div>
+                       <div className="text-xs text-blue-600 dark:text-blue-400 text-center">
+                         {processingProgress.current} of {processingProgress.total} documents
+                       </div>
+                     </>
+                   )}
+                 </div>
+               )}
               
               <div className="space-y-4">
                 <div>
@@ -584,20 +697,44 @@ export default function DocumentSummary() {
               <div className="flex space-x-3 mt-6">
                 <button
                   onClick={() => setShowBatchSummary(false)}
-                  className="flex-1 px-4 py-2 border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                  disabled={isProcessing}
+                  className={`flex-1 px-4 py-2 border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg transition-colors ${
+                    isProcessing 
+                      ? 'opacity-50 cursor-not-allowed' 
+                      : 'hover:bg-gray-50 dark:hover:bg-gray-700'
+                  }`}
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleBatchSummarize}
-                  className="flex-1 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
+                  disabled={isProcessing || selectedDocs.size === 0}
+                  className={`flex-1 px-4 py-2 rounded-lg transition-colors flex items-center justify-center space-x-2 ${
+                    isProcessing || selectedDocs.size === 0
+                      ? 'bg-gray-400 cursor-not-allowed'
+                      : 'bg-green-500 hover:bg-green-600'
+                  } text-white`}
                 >
-                  Start Summarization
+                  {isProcessing ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      <span>Processing...</span>
+                    </>
+                  ) : (
+                    <span>Start Summarization</span>
+                  )}
                 </button>
               </div>
             </div>
           </div>
         )}
+        
+        {/* Flashcard Modal */}
+        <FlashcardModal
+          isOpen={showFlashcardModal}
+          onClose={() => setShowFlashcardModal(false)}
+          selectedDocuments={documents.filter(doc => selectedDocs.has(doc.id))}
+        />
       </div>
     </div>
   )

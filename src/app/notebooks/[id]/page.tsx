@@ -94,8 +94,8 @@ export default function NotebookDetailPage() {
     onTranscriptionResult: (result) => {
       console.log('🔍 [DEBUG] Transcription result:', result);
       console.log('🔍 [DEBUG] translateToEnglish parameter passed to hook:', translateToEnglish);
-      if (result.detectedLanguage) {
-        console.log('🔍 [DEBUG] Detected language:', result.detectedLanguage);
+      if (result.language) {
+        console.log('🔍 [DEBUG] Detected language:', result.language);
       }
     }
   });
@@ -919,7 +919,6 @@ export default function NotebookDetailPage() {
                       </button>
                     )}
                   </div>
-                  <span className="text-xs text-gray-400 hidden sm:block">Press Enter to send, Shift+Enter for new line</span>
                 </div>
               </div>
               

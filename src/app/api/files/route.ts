@@ -6,6 +6,38 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
+// Helper function to extract text from XML structure
+function extractTextFromXML(obj: any): string {
+  let extractedText = '';
+  
+  if (typeof obj === 'string' && obj.trim().length > 0) {
+    // Skip XML attributes and metadata
+    if (!obj.includes('xmlns') && !obj.includes('http://') && 
+        !obj.match(/^[0-9]+$/) && !obj.match(/^[a-f0-9-]+$/i)) {
+      extractedText += obj + ' ';
+    }
+  } else if (typeof obj === 'object' && obj !== null) {
+    Object.keys(obj).forEach(key => {
+      // Focus on text content nodes
+      if (key === 'a:t' || key.endsWith(':t')) {
+        extractedText += extractTextFromXML(obj[key]);
+      } else if (key === 'a:p' || key.endsWith(':p') || 
+                key === 'a:r' || key.endsWith(':r') ||
+                key === 'p:txBody' || key.endsWith(':txBody')) {
+        extractedText += extractTextFromXML(obj[key]);
+      } else if (Array.isArray(obj[key])) {
+        obj[key].forEach((item: any) => {
+          extractedText += extractTextFromXML(item);
+        });
+      } else {
+        extractedText += extractTextFromXML(obj[key]);
+      }
+    });
+  }
+  
+  return extractedText;
+}
+
 // Enhanced document processor functionality with dynamic imports
 async function extractTextFromBuffer(buffer: Buffer, filename: string): Promise<string> {
   const fileExtension = filename.toLowerCase().split('.').pop();
@@ -22,40 +54,7 @@ async function extractTextFromBuffer(buffer: Buffer, filename: string): Promise<
         // PPT extraction using pptx2json
         try {
           const pptx2json = await import('pptx2json');
-          const pptxParser = new pptx2json.default();
-          const pptData = await pptxParser.buffer2json(buffer);
-          
-          // Extract text from XML structure returned by buffer2json
-          function extractTextFromXML(obj: any): string {
-            let extractedText = '';
-            
-            if (typeof obj === 'string' && obj.trim().length > 0) {
-              // Skip XML attributes and metadata
-              if (!obj.includes('xmlns') && !obj.includes('http://') && 
-                  !obj.match(/^[0-9]+$/) && !obj.match(/^[a-f0-9-]+$/i)) {
-                extractedText += obj + ' ';
-              }
-            } else if (typeof obj === 'object' && obj !== null) {
-              Object.keys(obj).forEach(key => {
-                // Focus on text content nodes
-                if (key === 'a:t' || key.endsWith(':t')) {
-                  extractedText += extractTextFromXML(obj[key]);
-                } else if (key === 'a:p' || key.endsWith(':p') || 
-                          key === 'a:r' || key.endsWith(':r') ||
-                          key === 'p:txBody' || key.endsWith(':txBody')) {
-                  extractedText += extractTextFromXML(obj[key]);
-                } else if (Array.isArray(obj[key])) {
-                  obj[key].forEach((item: any) => {
-                    extractedText += extractTextFromXML(item);
-                  });
-                } else {
-                  extractedText += extractTextFromXML(obj[key]);
-                }
-              });
-            }
-            
-            return extractedText;
-          }
+          const pptData = await pptx2json.toJson(buffer);
           
           // Look for slide files in the parsed data
           let pptText = '';
@@ -66,9 +65,10 @@ async function extractTextFromBuffer(buffer: Buffer, filename: string): Promise<
           });
           
           return cleanAndFormatText(pptText || `PowerPoint file: ${filename} - No text content found`);
-        } catch (pptError) {
+        } catch (pptError: unknown) {
           console.error('PPT extraction error:', pptError);
-          return cleanAndFormatText(`PowerPoint file: ${filename} - Content extraction failed: ${pptError.message}`);
+          const errorMessage = pptError instanceof Error ? pptError.message : 'Unknown error';
+          return cleanAndFormatText(`PowerPoint file: ${filename} - Content extraction failed: ${errorMessage}`);
         }
       
       case 'docx':

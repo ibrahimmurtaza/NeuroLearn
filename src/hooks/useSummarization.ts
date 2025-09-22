@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { Summary, SummarizationOptions, ExportFormat, SummaryType } from '@/types/summarization'
+import { Summary, SummaryOptions, ExportFormat, SummaryType } from '@/types/summarization'
 import { useAuth } from '@/contexts/AuthContext'
 
 interface UseSummarizationReturn {

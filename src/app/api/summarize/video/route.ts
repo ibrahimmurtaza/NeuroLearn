@@ -435,32 +435,28 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Fetch video documents (filter by video file types)
-    const videoTypes = [
-      'video/mp4',
-      'video/avi',
-      'video/mov',
-      'video/wmv',
-      'video/flv',
-      'video/webm',
-      'video/mkv'
-    ];
-
+    // Fetch video summaries directly from video_summaries table
     let query = supabase
-      .from('documents')
+      .from('video_summaries')
       .select(`
-        *,
-        summaries!inner(
-          id,
-          summary_type,
-          content,
-          key_points,
-          processing_status,
-          created_at
-        )
+        id,
+        title,
+        description,
+        video_url,
+        video_file_path,
+        duration,
+        summary,
+        key_points,
+        processing_status,
+        created_at,
+        updated_at,
+        video_title,
+        video_description,
+        channel_name,
+        thumbnail_url,
+        source_type
       `)
       .eq('user_id', userId)
-      .in('file_type', videoTypes)
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
 
@@ -468,23 +464,23 @@ export async function GET(request: NextRequest) {
       query = query.eq('folder_id', folderId);
     }
 
-    const { data: videoDocuments, error } = await query;
+    const { data: videoSummaries, error } = await query;
 
     if (error) {
-      console.error('Error fetching video documents:', error);
+      console.error('Error fetching video summaries:', error);
       return NextResponse.json(
-        { error: 'Failed to fetch video documents' },
+        { error: 'Failed to fetch video summaries' },
         { status: 500 }
       );
     }
 
     return NextResponse.json({
-      videos: videoDocuments || [],
-      total: videoDocuments?.length || 0
+      videos: videoSummaries || [],
+      total: videoSummaries?.length || 0
     });
 
   } catch (error) {
-    console.error('Get video documents error:', error);
+    console.error('Get video summaries error:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

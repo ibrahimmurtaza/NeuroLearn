@@ -56,7 +56,7 @@ class WhisperService {
         .audioFrequency(16000)
         .format('wav')
         .on('end', () => resolve())
-        .on('error', (err) => reject(err))
+        .on('error', (err: any) => reject(err))
         .save(outPath);
     });
 

@@ -72,7 +72,9 @@ export class AudioConverter {
           audioContext.close();
           
           // If all conversion attempts fail, throw an error instead of creating invalid WAV
-          throw new Error(`WebM conversion failed: ${decodeError.message}. Offline fallback also failed: ${offlineError.message}`);
+          const offlineErrorMessage = offlineError instanceof Error ? offlineError.message : String(offlineError);
+          const decodeErrorMessage = decodeError instanceof Error ? decodeError.message : String(decodeError);
+          throw new Error(`WebM conversion failed: ${decodeErrorMessage}. Offline fallback also failed: ${offlineErrorMessage}`);
         }
       }
       
@@ -80,7 +82,8 @@ export class AudioConverter {
       console.error('WebM to WAV conversion completely failed:', error);
       
       // Instead of creating invalid WAV, suggest recording in a different format
-      throw new Error(`Unable to convert WebM to WAV: ${error.message}. Please try recording again or use a different browser.`);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      throw new Error(`Unable to convert WebM to WAV: ${errorMessage}. Please try recording again or use a different browser.`);
     }
   }
 

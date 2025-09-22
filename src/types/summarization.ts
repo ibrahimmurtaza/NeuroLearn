@@ -8,6 +8,9 @@ export type AudioType = 'lecture' | 'meeting' | 'interview' | 'podcast' | 'other
 export type AnalysisType = 'comparison' | 'synthesis' | 'themes' | 'timeline'
 export type ExportFormat = 'pdf' | 'docx' | 'pptx' | 'txt' | 'markdown' | 'json' | 'csv' | 'srt' | 'vtt' | 'anki'
 
+// Re-export from video-summarization types
+export type { SummaryOptions } from './video-summarization'
+
 // Document related types
 export interface Document {
   id: string

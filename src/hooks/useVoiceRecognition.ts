@@ -8,7 +8,8 @@ import {
   SpeechRecognition,
   SpeechRecognitionEvent,
   SpeechRecognitionErrorEvent,
-  ExtendedSpeechRecognition
+  ExtendedSpeechRecognition,
+  TranscriptionMethod
 } from '@/types/voice';
 
 /**
@@ -30,6 +31,8 @@ export const useVoiceRecognition = ({
   const [interimTranscript, setInterimTranscript] = useState('');
   const [error, setError] = useState<VoiceError | null>(null);
   const [audioLevel, setAudioLevel] = useState(0);
+  const [transcriptionMethod] = useState<TranscriptionMethod>('web-speech');
+  const [isProcessing, setIsProcessing] = useState(false);
   
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -271,6 +274,11 @@ export const useVoiceRecognition = ({
     setError(null);
   }, []);
 
+  // Set transcription method (no-op for basic hook)
+  const setTranscriptionMethod = useCallback(() => {
+    // This hook only supports web-speech, so this is a no-op
+  }, []);
+
   // Initialize support check
   useEffect(() => {
     setIsSupported(checkSpeechRecognitionSupport());
@@ -293,9 +301,12 @@ export const useVoiceRecognition = ({
     interimTranscript,
     error,
     audioLevel,
+    transcriptionMethod,
+    isProcessing,
     startRecording,
     stopRecording,
     resetTranscript,
-    clearError
+    clearError,
+    setTranscriptionMethod
   };
 };

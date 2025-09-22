@@ -878,18 +878,21 @@ export const useVoiceRecognitionEnhanced = ({
              }
            }).catch(error => {
              console.error('Web Audio API transcription failed:', error);
-             setError('Transcription failed');
-             onError?.('Transcription failed');
+             const transcriptionError = handleError('network', 'Transcription failed');
+             setError(transcriptionError);
+             onError?.(transcriptionError);
            });
          } else {
           console.error('Web Audio API produced empty or invalid blob');
-          setError('Recording failed - no audio data captured');
-          onError?.('Recording failed - no audio data captured');
+          const captureError = handleError('audio-capture', 'Recording failed - no audio data captured');
+          setError(captureError);
+          onError?.(captureError);
         }
       } catch (webAudioError) {
         console.error('Web Audio API stop failed:', webAudioError);
-        setError('Recording failed during audio processing');
-        onError?.('Recording failed during audio processing');
+        const processingError = handleError('audio-capture', 'Recording failed during audio processing');
+        setError(processingError);
+        onError?.(processingError);
       }
       webAudioRecorderRef.current = null;
       usingWebAudioFallback.current = false;

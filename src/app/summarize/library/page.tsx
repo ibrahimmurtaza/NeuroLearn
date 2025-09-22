@@ -210,7 +210,7 @@ export default function DocumentSummary() {
         setProcessingProgress({ 
           current: i, 
           total: selectedDocuments.length, 
-          currentDoc: `Processing "${selectedDocuments[i].name || selectedDocuments[i].title || `Document ${i + 1}`}"...` 
+          currentDoc: `Processing "${selectedDocuments[i].name || `Document ${i + 1}`}"...` 
         })
         // Small delay to show progress
         await new Promise(resolve => setTimeout(resolve, 100))
@@ -541,7 +541,7 @@ export default function DocumentSummary() {
                 </div>
                 
                 <h3 className="font-semibold text-gray-900 dark:text-white mb-2 truncate">
-                  {doc.name}
+                  {doc.name || 'Untitled Document'}
                 </h3>
                 
                 <div className="space-y-2 text-sm text-gray-500 dark:text-gray-400">
@@ -569,7 +569,7 @@ export default function DocumentSummary() {
                   <div className="mt-4 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
                     <div className="mb-2 pb-2 border-b border-gray-200 dark:border-gray-600">
                       <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-200">
-                        Summary: {doc.name}
+                        Summary: {doc.name || 'Untitled Document'}
                       </h4>
                     </div>
                     <p className="text-sm text-gray-700 dark:text-gray-300 line-clamp-3">
@@ -733,7 +733,10 @@ export default function DocumentSummary() {
         <FlashcardModal
           isOpen={showFlashcardModal}
           onClose={() => setShowFlashcardModal(false)}
-          selectedDocuments={documents.filter(doc => selectedDocs.has(doc.id))}
+          selectedDocuments={documents
+            .filter(doc => selectedDocs.has(doc.id))
+            .map(doc => ({ id: doc.id, name: doc.name || 'Untitled Document' }))
+          }
         />
       </div>
     </div>

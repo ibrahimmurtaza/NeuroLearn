@@ -134,7 +134,7 @@ function FlashcardDisplay({ flashcards, topic, onExport, onClose, flashcardSetId
                 </div>
               </div>
               <a
-                href="/flashcards"
+                href="summarize/flashcards"
                 className="text-sm bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded-md transition-colors"
               >
                 View in Library

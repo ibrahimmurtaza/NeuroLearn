@@ -16,7 +16,7 @@ export interface VoiceError {
   message: string;
 }
 
-export type TranscriptionMethod = 'web-speech' | 'whisper' | 'hybrid';
+export type TranscriptionMethod = 'web-speech' | 'whisper' | 'whisper-translate' | 'hybrid';
 
 export interface TranscriptionResult {
   text: string;

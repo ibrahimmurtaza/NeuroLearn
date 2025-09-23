@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { VideoSummary, TranscriptSegment, VideoFrame } from '@/types/video-summarization';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card';
-import { Badge } from '@/components/ui/Badge';
+import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -445,19 +445,16 @@ export function VideoSummaryDetail({ video, onBack, onVideoUpdate }: VideoSummar
           ) : frames && frames.frames.length > 0 ? (
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
               {frames.frames.map((frame, index) => {
-                const frameUrl = frame.frameUrl || frame.frame_url;
-                
                 return (
                   <Card key={index} className="overflow-hidden hover:shadow-md transition-shadow">
                     <CardContent className="p-0">
                       <div className="relative aspect-video">
-                        {frameUrl ? (
-                          <Image
-                            src={frameUrl}
+                        {frame.frame_url ? (
+                          <img
+                            src={frame.frame_url}
                             alt={`Frame at ${formatTimestamp(frame.timestamp)}`}
-                            fill
-                            className="object-cover"
-                            sizes="(max-width: 768px) 50vw, (max-width: 1200px) 33vw, 25vw"
+                            className="object-cover rounded-lg w-full h-full"
+                            style={{ aspectRatio: '16/9' }}
                           />
                         ) : (
                           <div className="w-full h-full bg-gray-200 flex items-center justify-center">

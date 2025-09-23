@@ -5,6 +5,7 @@ import multer from 'multer';
 import ffmpeg from 'ffmpeg-static';
 import { spawn } from 'child_process';
 import { promises as fs } from 'fs';
+import * as fsSync from 'fs';
 import path from 'path';
 import os from 'os';
 import { v4 as uuidv4 } from 'uuid';
@@ -422,7 +423,7 @@ async function downloadVideoFile(videoUrl: string): Promise<string> {
   
   const buffer = await response.arrayBuffer();
   const tempPath = path.join(os.tmpdir(), `video_${Date.now()}.mp4`);
-  fs.writeFileSync(tempPath, Buffer.from(buffer));
+  fsSync.writeFileSync(tempPath, Buffer.from(buffer));
   
   return tempPath;
 }

@@ -149,9 +149,9 @@ async function transcribeAudio(
     // Convert OpenAI response to our format
     const segments: TranscriptSegment[] = [];
     
-    if (transcription.segments) {
-      for (let i = 0; i < transcription.segments.length; i++) {
-        const segment = transcription.segments[i];
+    if ((transcription as any).segments) {
+      for (let i = 0; i < (transcription as any).segments.length; i++) {
+        const segment = (transcription as any).segments[i];
         
         segments.push({
           id: `segment_${i}_${Date.now()}`,
@@ -159,7 +159,7 @@ async function transcribeAudio(
           endTime: segment.end,
           text: segment.text.trim(),
           confidence: segment.avg_logprob ? Math.exp(segment.avg_logprob) : undefined,
-          keywords: segment.tokens ? segment.tokens.filter(token => token.length > 3) : undefined
+          keywords: segment.tokens ? segment.tokens.filter((token: any) => token.length > 3) : undefined
         });
       }
     } else {

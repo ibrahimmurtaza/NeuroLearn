@@ -498,6 +498,7 @@ async function saveToDatabase(
 export async function POST(request: NextRequest) {
   const operationId = `youtube-${Date.now()}`;
   const errorHandler = ErrorHandlingService.getInstance();
+  let userId: string | undefined;
 
   try {
     // Set up authenticated Supabase client
@@ -532,7 +533,7 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json();
     const { url, options } = body;
-    const userId = user.id; // Use authenticated user ID instead of request body
+    userId = user.id; // Use authenticated user ID instead of request body
 
     if (!url) {
       const error = errorHandler.createError(
@@ -592,7 +593,7 @@ export async function POST(request: NextRequest) {
         updateProgress('database', 80, 'Saving to database');
         
         // Save to database
-        const savedData = await saveToDatabase(userId, metadata, transcript, summary);
+        const savedData = await saveToDatabase(userId!, metadata, transcript, summary);
 
         updateProgress('frames', 90, 'Extracting video frames');
         

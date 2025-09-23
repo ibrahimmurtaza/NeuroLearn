@@ -2,8 +2,10 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
-import { Mic, MicOff, Upload, Play, Pause, Square, Download, Copy, RotateCcw, Settings, Volume2, FileAudio, Clock, Headphones } from 'lucide-react'
+import { Mic, MicOff, Upload, Play, Pause, Square, Download, Copy, RotateCcw, Settings, Volume2, FileAudio, Clock, Headphones, Library } from 'lucide-react'
 import Link from 'next/link'
+import { AudioSummaryList } from '@/components/AudioSummaryList'
+import { AudioSummaryDetail } from '@/components/AudioSummaryDetail'
 
 interface AudioSummary {
   id: string
@@ -48,7 +50,10 @@ interface WaveformData {
 
 export default function AudioSummary() {
   const { user } = useAuth()
+  const [mainTab, setMainTab] = useState<'process' | 'library'>('process')
   const [activeTab, setActiveTab] = useState<'upload' | 'record'>('upload')
+  const [selectedAudio, setSelectedAudio] = useState<any>(null)
+  const [refreshTrigger, setRefreshTrigger] = useState(0)
   const [uploadedFile, setUploadedFile] = useState<File | null>(null)
   const [isRecording, setIsRecording] = useState(false)
   const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null)
@@ -132,11 +137,35 @@ export default function AudioSummary() {
   }
 
   const processAudio = async (audioFile: File | Blob) => {
+    // Authentication check
+    if (!user) {
+      alert('Please log in to process audio files.')
+      return
+    }
+
+    // File validation
+    if (!audioFile) {
+      alert('Please select an audio file to process.')
+      return
+    }
+
+    // File size validation (200MB limit as per API)
+    const maxSize = 200 * 1024 * 1024 // 200MB
+    if (audioFile.size > maxSize) {
+      alert('File size exceeds 200MB limit. Please choose a smaller file.')
+      return
+    }
+
     setIsProcessing(true)
 
     const formData = new FormData()
-    formData.append('audio', audioFile)
-    formData.append('options', JSON.stringify(summaryOptions))
+    formData.append('file', audioFile)
+    formData.append('userId', user.id)
+    formData.append('language', summaryOptions.language)
+    formData.append('summaryType', summaryOptions.length)
+    formData.append('audioType', 'general')
+    // Optional: Add folderId if you have folder management
+    // formData.append('folderId', currentFolderId || '')
 
     try {
       const response = await fetch('/api/summarize/audio', {
@@ -146,15 +175,63 @@ export default function AudioSummary() {
 
       if (response.ok) {
         const data = await response.json()
-        setAudioSummary(data.summary)
-        setTranscript(data.transcript)
-        setWaveformData(data.waveform)
+        
+        // Handle the AudioProcessResponse format
+        if (data.success && data.summary) {
+          // Create AudioSummary object from API response
+          const audioSummaryData: AudioSummary = {
+            id: `audio-${Date.now()}`,
+            title: data.fileName || 'Audio Summary',
+            summary: data.summary.content,
+            keyPoints: data.summary.keyPoints || [],
+            duration: 0,
+            speakers: data.speakers ? data.speakers.map((speaker: string, index: number) => ({
+              id: `speaker-${index}`,
+              name: speaker,
+              segments: []
+            })) : [],
+            topics: [],
+            emotions: [],
+            createdAt: data.processedAt || new Date().toISOString()
+          }
+          
+          setAudioSummary(audioSummaryData)
+          setTranscript(data.transcript)
+          // Note: waveform data is not provided by current API
+          setWaveformData(null)
+          // Trigger library refresh and optionally switch to library tab
+          handleProcessSuccess()
+        } else {
+          throw new Error(data.error || 'Failed to process audio file')
+        }
       } else {
-        throw new Error('Failed to process audio file')
+        // Handle specific HTTP status codes
+        let errorMessage = 'Failed to process audio file'
+        
+        if (response.status === 401) {
+          errorMessage = 'Authentication failed. Please log in again.'
+        } else if (response.status === 403) {
+          errorMessage = 'Access denied. You do not have permission to process audio files.'
+        } else if (response.status === 413) {
+          errorMessage = 'File too large. Please choose a smaller audio file.'
+        } else if (response.status === 415) {
+          errorMessage = 'Unsupported file format. Please use a supported audio format.'
+        } else if (response.status >= 500) {
+          errorMessage = 'Server error. Please try again later.'
+        }
+        
+        const errorData = await response.json().catch(() => ({ error: errorMessage }))
+        throw new Error(errorData.error || errorMessage)
       }
     } catch (error) {
       console.error('Error processing audio:', error)
-      alert('Failed to process audio file. Please try again.')
+      
+      // Handle network errors
+      if (error instanceof TypeError && error.message.includes('fetch')) {
+        alert('Network error. Please check your internet connection and try again.')
+      } else {
+        alert(`Failed to process audio file: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      }
     } finally {
       setIsProcessing(false)
     }
@@ -281,6 +358,27 @@ export default function AudioSummary() {
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
     }
+    if (audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current.currentTime = 0
+    }
+  }
+
+  const handleAudioSelect = (audio: any) => {
+    setSelectedAudio(audio)
+  }
+
+  const handleBackToLibrary = () => {
+    setSelectedAudio(null)
+  }
+
+  const handleAudioUpdate = (updatedAudio: any) => {
+    setRefreshTrigger(prev => prev + 1)
+  }
+
+  const handleProcessSuccess = () => {
+    setRefreshTrigger(prev => prev + 1)
+    setMainTab('library')
   }
 
   const processRecording = () => {
@@ -290,111 +388,145 @@ export default function AudioSummary() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-pink-50 to-purple-100 dark:from-gray-900 dark:to-gray-800">
+    <div className="min-h-screen bg-gradient-to-br from-pink-50 via-white to-purple-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
       <div className="container mx-auto px-4 py-8">
         {/* Header */}
-        <div className="mb-8">
-          <div className="flex items-center space-x-3 mb-4">
-            <Link href="/summarize" className="text-pink-600 hover:text-pink-800 transition-colors">
-              ← Back to Dashboard
-            </Link>
-          </div>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
-              <div className="h-12 w-12 bg-gradient-to-r from-pink-500 to-purple-600 rounded-xl flex items-center justify-center">
-                <Headphones className="h-6 w-6 text-white" />
-              </div>
-              <div>
-                <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
-                  Audio Summarization
-                </h1>
-                <p className="text-gray-600 dark:text-gray-300">
-                  Extract insights from audio files and recordings
-                </p>
-              </div>
+        <div className="text-center mb-8">
+          <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-4">
+            Audio Summarization
+          </h1>
+          <p className="text-lg text-gray-600 dark:text-gray-300 max-w-2xl mx-auto">
+            Upload or record audio files to get AI-powered summaries, transcripts, and insights
+          </p>
+        </div>
+
+        {/* Main Tab Navigation */}
+        <div className="flex justify-center mb-8">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-2">
+            <div className="flex space-x-2">
+              <button
+                onClick={() => setMainTab('process')}
+                className={`flex items-center space-x-2 px-6 py-3 rounded-xl transition-all ${
+                  mainTab === 'process'
+                    ? 'bg-pink-500 text-white shadow-md'
+                    : 'text-gray-600 dark:text-gray-300 hover:text-pink-600 dark:hover:text-pink-400'
+                }`}
+              >
+                <Volume2 className="h-5 w-5" />
+                <span>Process Audio</span>
+              </button>
+              <button
+                onClick={() => setMainTab('library')}
+                className={`flex items-center space-x-2 px-6 py-3 rounded-xl transition-all ${
+                  mainTab === 'library'
+                    ? 'bg-pink-500 text-white shadow-md'
+                    : 'text-gray-600 dark:text-gray-300 hover:text-pink-600 dark:hover:text-pink-400'
+                }`}
+              >
+                <Library className="h-5 w-5" />
+                <span>Audio Library</span>
+              </button>
             </div>
-            
-            <button
-              onClick={() => setShowOptions(!showOptions)}
-              className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-300 px-4 py-2 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors flex items-center space-x-2"
-            >
-              <Settings className="h-5 w-5" />
-              <span>Options</span>
-            </button>
           </div>
         </div>
 
-        {/* Options Panel */}
-        {showOptions && (
-          <div className="mb-8 bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-              Summary Options
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Summary Length
-                </label>
-                <select
-                  value={summaryOptions.length}
-                  onChange={(e) => setSummaryOptions(prev => ({ ...prev, length: e.target.value as any }))}
-                  className="w-full p-3 border border-gray-200 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent dark:bg-gray-700 dark:text-white"
-                >
-                  <option value="short">Short (~100 words)</option>
-                  <option value="medium">Medium (~250 words)</option>
-                  <option value="detailed">Detailed (~500 words)</option>
-                </select>
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Focus Area
-                </label>
-                <select
-                  value={summaryOptions.focus}
-                  onChange={(e) => setSummaryOptions(prev => ({ ...prev, focus: e.target.value as any }))}
-                  className="w-full p-3 border border-gray-200 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent dark:bg-gray-700 dark:text-white"
-                >
-                  <option value="general">General Overview</option>
-                  <option value="key-points">Key Points</option>
-                  <option value="speakers">Speaker Analysis</option>
-                  <option value="emotions">Emotion Analysis</option>
-                  <option value="topics">Topic Analysis</option>
-                </select>
-              </div>
-              
-              <div className="flex items-center">
-                <label className="flex items-center space-x-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={summaryOptions.includeSpeakers}
-                    onChange={(e) => setSummaryOptions(prev => ({ ...prev, includeSpeakers: e.target.checked }))}
-                    className="w-4 h-4 text-pink-600 bg-gray-100 border-gray-300 rounded focus:ring-pink-500 dark:focus:ring-pink-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
-                  />
-                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Include Speakers
-                  </span>
-                </label>
-              </div>
-              
-              <div className="flex items-center">
-                <label className="flex items-center space-x-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={summaryOptions.includeEmotions}
-                    onChange={(e) => setSummaryOptions(prev => ({ ...prev, includeEmotions: e.target.checked }))}
-                    className="w-4 h-4 text-pink-600 bg-gray-100 border-gray-300 rounded focus:ring-pink-500 dark:focus:ring-pink-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
-                  />
-                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Include Emotions
-                  </span>
-                </label>
-              </div>
+        {/* Content based on active main tab */}
+        {mainTab === 'library' ? (
+          selectedAudio ? (
+            <AudioSummaryDetail
+              audio={selectedAudio}
+              onBack={handleBackToLibrary}
+            />
+          ) : (
+            <AudioSummaryList
+              onAudioSelect={handleAudioSelect}
+              refreshTrigger={refreshTrigger}
+            />
+          )
+        ) : (
+          <>
+            {/* Options Panel */}
+            <div className="flex justify-center mb-8">
+              <button
+                onClick={() => setShowOptions(!showOptions)}
+                className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-300 px-6 py-3 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors flex items-center space-x-2 shadow-md"
+              >
+                <Settings className="h-5 w-5" />
+                <span>Processing Options</span>
+              </button>
             </div>
-          </div>
-        )}
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            {/* Options Panel */}
+            {showOptions && (
+              <div className="mb-8 bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+                  Summary Options
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Summary Length
+                    </label>
+                    <select
+                      value={summaryOptions.length}
+                      onChange={(e) => setSummaryOptions(prev => ({ ...prev, length: e.target.value as any }))}
+                      className="w-full p-3 border border-gray-200 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent dark:bg-gray-700 dark:text-white"
+                    >
+                      <option value="short">Short (~100 words)</option>
+                      <option value="medium">Medium (~250 words)</option>
+                      <option value="detailed">Detailed (~500 words)</option>
+                    </select>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Focus Area
+                    </label>
+                    <select
+                      value={summaryOptions.focus}
+                      onChange={(e) => setSummaryOptions(prev => ({ ...prev, focus: e.target.value as any }))}
+                      className="w-full p-3 border border-gray-200 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent dark:bg-gray-700 dark:text-white"
+                    >
+                      <option value="general">General Overview</option>
+                      <option value="key-points">Key Points</option>
+                      <option value="speakers">Speaker Analysis</option>
+                      <option value="emotions">Emotion Analysis</option>
+                      <option value="topics">Topic Analysis</option>
+                    </select>
+                  </div>
+                  
+                  <div className="flex items-center">
+                    <label className="flex items-center space-x-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={summaryOptions.includeSpeakers}
+                        onChange={(e) => setSummaryOptions(prev => ({ ...prev, includeSpeakers: e.target.checked }))}
+                        className="w-4 h-4 text-pink-600 bg-gray-100 border-gray-300 rounded focus:ring-pink-500 dark:focus:ring-pink-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
+                      />
+                      <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Include Speakers
+                      </span>
+                    </label>
+                  </div>
+                  
+                  <div className="flex items-center">
+                    <label className="flex items-center space-x-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={summaryOptions.includeEmotions}
+                        onChange={(e) => setSummaryOptions(prev => ({ ...prev, includeEmotions: e.target.checked }))}
+                        className="w-4 h-4 text-pink-600 bg-gray-100 border-gray-300 rounded focus:ring-pink-500 dark:focus:ring-pink-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
+                      />
+                      <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Include Emotions
+                      </span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           {/* Input Section */}
           <div className="space-y-6">
             {/* Tab Navigation */}
@@ -780,7 +912,9 @@ export default function AudioSummary() {
               </div>
             )}
           </div>
-        </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   )

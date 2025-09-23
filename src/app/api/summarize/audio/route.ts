@@ -1,19 +1,106 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import OpenAI from 'openai';
-import { v4 as uuidv4 } from 'uuid';
-import { AudioProcessRequest, AudioProcessResponse, ProcessingStatus } from '@/types/summarization';
+import { createServerClient } from '@supabase/ssr';
+import { cookies } from 'next/headers';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
-
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY!);
+const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY!);
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!
 });
+
+// Initialize Supabase client with SSR support
+function createSupabaseClient() {
+  const cookieStore = cookies();
+  
+  return createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        get(name: string) {
+          return cookieStore.get(name)?.value;
+        },
+      },
+    }
+  );
+}
+
+// Service role client for database operations
+const supabaseServiceUrl = 'https://cgryfltmvaplsrawoktj.supabase.co';
+const supabaseServiceKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNncnlmbHRtdmFwbHNyYXdva3RqIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1NzM0NTg0NywiZXhwIjoyMDcyOTIxODQ3fQ.HM-uJp33p6wYcGh-2PqjuvJXTnrvfN3EwBR1V9hVm5I';
+
+const { createClient } = require('@supabase/supabase-js');
+const supabaseService = createClient(supabaseServiceUrl, supabaseServiceKey);
+
+// Database functions
+async function saveAudioFile(userId: string, filename: string, fileSize: number, fileType: string, language: string, audioType: string): Promise<string> {
+  const { data, error } = await supabaseService
+    .from('audio_files')
+    .insert({
+      user_id: userId,
+      filename,
+      original_filename: filename,
+      file_type: fileType,
+      storage_path: `/audio/${Date.now()}_${filename}`, // Placeholder storage path
+      file_size: fileSize,
+      processing_status: 'processed'
+    })
+    .select('id')
+    .single();
+
+  if (error) {
+    console.error('Error saving audio file:', error);
+    throw new Error('Failed to save audio file metadata');
+  }
+
+  return data.id;
+}
+
+async function saveTranscript(audioFileId: string, userId: string, transcript: string, language: string): Promise<string> {
+  const { data, error } = await supabaseService
+    .from('audio_transcripts')
+    .insert({
+      audio_file_id: audioFileId,
+      user_id: userId,
+      transcript_text: transcript,
+      language,
+      confidence_score: 0.95 // Default confidence for Whisper
+    })
+    .select('id')
+    .single();
+
+  if (error) {
+    console.error('Error saving transcript:', error);
+    throw new Error('Failed to save transcript');
+  }
+
+  return data.id;
+}
+
+async function saveSummary(audioFileId: string, transcriptId: string, userId: string, title: string, summary: string, keyPoints: string[], summaryType: string, language: string): Promise<string> {
+  const { data, error } = await supabaseService
+    .from('audio_summaries')
+    .insert({
+      audio_file_id: audioFileId,
+      transcript_id: transcriptId,
+      user_id: userId,
+      title,
+      summary_text: summary,
+      key_points: keyPoints,
+      summary_type: summaryType,
+      language
+    })
+    .select('id')
+    .single();
+
+  if (error) {
+    console.error('Error saving summary:', error);
+    throw new Error('Failed to save summary');
+  }
+
+  return data.id;
+}
 
 // Audio processing utilities
 async function transcribeAudioFile(audioBuffer: Buffer, filename: string, language?: string): Promise<string> {
@@ -61,6 +148,34 @@ async function transcribeAudioFile(audioBuffer: Buffer, filename: string, langua
   }
 }
 
+// Retry utility function
+async function retryWithBackoff<T>(
+  fn: () => Promise<T>,
+  maxRetries: number = 3,
+  baseDelay: number = 1000
+): Promise<T> {
+  let lastError: Error;
+  
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error as Error;
+      
+      if (attempt === maxRetries) {
+        throw lastError;
+      }
+      
+      // Exponential backoff with jitter
+      const delay = baseDelay * Math.pow(2, attempt) + Math.random() * 1000;
+      console.log(`Attempt ${attempt + 1} failed, retrying in ${delay}ms:`, error);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+  
+  throw lastError!;
+}
+
 async function generateAudioSummary(
   transcript: string,
   summaryType: string,
@@ -68,7 +183,20 @@ async function generateAudioSummary(
   audioType: 'podcast' | 'lecture' | 'meeting' | 'interview' | 'general' = 'general'
 ): Promise<{ summary: string; keyPoints: string[]; speakers?: string[] }> {
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
+    // Check if API key is available
+    if (!process.env.GOOGLE_API_KEY) {
+      throw new Error('Google API key is not configured');
+    }
+    
+    const model = genAI.getGenerativeModel({ 
+      model: 'gemini-1.5-flash',
+      generationConfig: {
+        temperature: 0.7,
+        topK: 40,
+        topP: 0.95,
+        maxOutputTokens: 2048,
+      }
+    });
     
     const languageInstructions = {
       en: 'Respond in English.',
@@ -96,19 +224,25 @@ async function generateAudioSummary(
 
     const specificPrompt = audioPrompts[audioType] || audioPrompts.general;
     
-    // Generate summary
+    // Generate summary with retry logic
     const summaryPrompt = `${languageInstruction}\n\n${specificPrompt}\n\nTranscript:\n${transcript}`;
     
-    const summaryResult = await model.generateContent(summaryPrompt);
-    const summaryResponse = await summaryResult.response;
-    const summary = summaryResponse.text();
+    console.log('Generating summary with Gemini API...');
+    const summary = await retryWithBackoff(async () => {
+      const summaryResult = await model.generateContent(summaryPrompt);
+      const summaryResponse = await summaryResult.response;
+      return summaryResponse.text();
+    });
 
-    // Generate key points
+    // Generate key points with retry logic
     const keyPointsPrompt = `${languageInstruction}\n\nExtract 6-10 key points from the following audio transcript. Focus on the most important information, insights, or takeaways. Return them as a simple list, one point per line, without numbering or bullet points:\n\n${transcript}`;
     
-    const keyPointsResult = await model.generateContent(keyPointsPrompt);
-    const keyPointsResponse = await keyPointsResult.response;
-    const keyPointsText = keyPointsResponse.text();
+    console.log('Generating key points with Gemini API...');
+    const keyPointsText = await retryWithBackoff(async () => {
+      const keyPointsResult = await model.generateContent(keyPointsPrompt);
+      const keyPointsResponse = await keyPointsResult.response;
+      return keyPointsResponse.text();
+    });
     
     const keyPoints = keyPointsText
       .split('\n')
@@ -126,46 +260,80 @@ async function generateAudioSummary(
       speakers: speakers.length > 0 ? speakers : undefined
     };
   } catch (error) {
-    console.error('Audio summary generation error:', error);
-    throw new Error('Failed to generate audio summary');
-  }
-}
-
-// Chunk transcript for better processing
-function chunkTranscript(transcript: string, maxChunkSize: number = 4000): string[] {
-  const sentences = transcript.split(/[.!?]+\s+/);
-  const chunks: string[] = [];
-  let currentChunk = '';
-
-  for (const sentence of sentences) {
-    if (currentChunk.length + sentence.length > maxChunkSize && currentChunk.length > 0) {
-      chunks.push(currentChunk.trim());
-      currentChunk = sentence;
-    } else {
-      currentChunk += (currentChunk ? '. ' : '') + sentence;
+    console.error('Audio summary generation error:', {
+      message: (error as Error).message,
+      stack: (error as Error).stack,
+      name: (error as Error).name,
+      timestamp: new Date().toISOString()
+    });
+    
+    // Check if it's a specific API error
+    if ((error as any)?.status === 503) {
+      throw new Error('Google Gemini API is temporarily unavailable (503). Please try again in a few minutes.');
     }
+    
+    if ((error as any)?.status === 429) {
+      throw new Error('API rate limit exceeded. Please wait a moment and try again.');
+    }
+    
+    if ((error as any)?.status === 401 || (error as any)?.status === 403) {
+      throw new Error('API authentication failed. Please check the Google API key configuration.');
+    }
+    
+    // For other errors, provide a more informative message
+    const errorMessage = (error as Error).message;
+    if (errorMessage.includes('API key')) {
+      throw new Error('Google API key is invalid or not configured properly.');
+    }
+    
+    if (errorMessage.includes('quota') || errorMessage.includes('limit')) {
+      throw new Error('API quota exceeded. Please try again later or check your Google Cloud billing.');
+    }
+    
+    // Generic fallback error
+    throw new Error(`Failed to generate audio summary: ${errorMessage}`);
   }
-
-  if (currentChunk.trim()) {
-    chunks.push(currentChunk.trim());
-  }
-
-  return chunks.filter(chunk => chunk.length > 0);
 }
+
+// Chunk transcript function removed - not needed for simplified API
 
 export async function POST(request: NextRequest) {
   try {
+    console.log('=== Audio Processing Started ===');
+    
+    // Get user authentication using Supabase SSR
+    const supabase = createSupabaseClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    
+    if (authError || !user) {
+      console.log('Authentication failed:', authError);
+      return NextResponse.json(
+        { error: 'Authentication required. Please log in to upload audio files.' },
+        { status: 401 }
+      );
+    }
+    
+    const userId = user.id;
+    console.log('User authenticated:', userId);
+
     const formData = await request.formData();
     const file = formData.get('file') as File;
-    const folderId = formData.get('folderId') as string;
-    const userId = formData.get('userId') as string;
     const language = formData.get('language') as string || 'en';
     const summaryType = formData.get('summaryType') as string || 'detailed';
     const audioType = formData.get('audioType') as string || 'general';
+    
+    console.log('Form data received:', { 
+      fileName: file?.name, 
+      fileSize: file?.size, 
+      fileType: file?.type,
+      language, 
+      summaryType, 
+      audioType 
+    });
 
-    if (!file || !userId) {
+    if (!file) {
       return NextResponse.json(
-        { error: 'Audio file and user ID are required' },
+        { error: 'Audio file is required' },
         { status: 400 }
       );
     }
@@ -199,259 +367,106 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Create document record for audio
-    const documentId = uuidv4();
-    const { data: document, error: docError } = await supabase
-      .from('documents')
-      .insert({
-        id: documentId,
-        title: file.name.replace(/\.[^/.]+$/, ''), // Remove file extension
-        file_name: file.name,
-        file_type: file.type,
-        file_size: file.size,
-        content: '', // Will be updated with transcript
-        language,
-        folder_id: folderId || null,
-        user_id: userId,
-        processing_status: 'processing',
-        word_count: 0,
-        character_count: 0
-      })
-      .select()
-      .single();
+    // Transcribe audio
+    console.log('Starting audio transcription...');
+    const audioBuffer = Buffer.from(await file.arrayBuffer());
+    const transcript = await transcribeAudioFile(audioBuffer, file.name, language);
+    console.log('Transcription completed. Length:', transcript?.length);
 
-    if (docError) {
-      console.error('Error creating audio document:', docError);
+    if (!transcript || transcript.length < 50) {
+      console.log('Transcript too short or empty:', transcript?.length);
       return NextResponse.json(
-        { error: 'Failed to save audio document' },
-        { status: 500 }
-      );
-    }
-
-    try {
-      // Transcribe audio
-      const audioBuffer = Buffer.from(await file.arrayBuffer());
-      const transcript = await transcribeAudioFile(audioBuffer, file.name, language);
-
-      if (!transcript || transcript.length < 50) {
-        await supabase
-          .from('documents')
-          .update({ processing_status: 'error' })
-          .eq('id', documentId);
-
-        return NextResponse.json(
-          { error: 'Unable to extract sufficient content from audio file' },
-          { status: 400 }
-        );
-      }
-
-      // Update document with transcript
-      await supabase
-        .from('documents')
-        .update({
-          content: transcript,
-          word_count: transcript.split(/\s+/).length,
-          character_count: transcript.length
-        })
-        .eq('id', documentId);
-
-      // Create document chunks
-      const chunks = chunkTranscript(transcript);
-      const chunkPromises = chunks.map((chunk, index) => 
-        supabase
-          .from('document_chunks')
-          .insert({
-            id: uuidv4(),
-            document_id: documentId,
-            chunk_index: index,
-            content: chunk,
-            word_count: chunk.split(/\s+/).length,
-            character_count: chunk.length
-          })
-      );
-
-      await Promise.all(chunkPromises);
-
-      // Generate audio summary
-      const { summary, keyPoints, speakers } = await generateAudioSummary(
-        transcript,
-        summaryType,
-        language,
-        audioType as any
-      );
-
-      // Create summary record
-      const summaryId = uuidv4();
-      const { data: summaryRecord, error: summaryError } = await supabase
-        .from('summaries')
-        .insert({
-          id: summaryId,
-          document_id: documentId,
-          summary_type: summaryType,
-          content: summary,
-          key_points: keyPoints,
-          language,
-          word_count: summary.split(/\s+/).length,
-          processing_status: 'completed',
-          user_id: userId,
-          metadata: speakers ? { speakers } : null
-        })
-        .select()
-        .single();
-
-      if (summaryError) {
-        console.error('Error creating summary:', summaryError);
-        // Continue without failing the entire process
-      }
-
-      // Create summary source
-      if (summaryRecord) {
-        await supabase
-          .from('summary_sources')
-          .insert({
-            id: uuidv4(),
-            summary_id: summaryId,
-            document_id: documentId,
-            source_type: 'audio',
-            relevance_score: 1.0
-          });
-      }
-
-      // Update document status to completed
-      await supabase
-        .from('documents')
-        .update({ processing_status: 'ready' })
-        .eq('id', documentId);
-
-      const response: AudioProcessResponse = {
-        success: true,
-        document: {
-          id: document.id,
-          title: document.title,
-          fileName: document.file_name,
-          fileType: document.file_type,
-          fileSize: document.file_size,
-          language: document.language,
-          processingStatus: 'ready',
-          wordCount: transcript.split(/\s+/).length,
-          characterCount: transcript.length,
-          createdAt: document.created_at,
-          updatedAt: document.updated_at
-        },
-        transcript,
-        summary: summaryRecord ? {
-          id: summaryRecord.id,
-          documentId: summaryRecord.document_id,
-          summaryType: summaryRecord.summary_type,
-          content: summaryRecord.content,
-          keyPoints: summaryRecord.key_points || [],
-          language: summaryRecord.language,
-          wordCount: summaryRecord.word_count,
-          processingStatus: summaryRecord.processing_status,
-          createdAt: summaryRecord.created_at,
-          updatedAt: summaryRecord.updated_at
-        } : undefined,
-        chunksCreated: chunks.length,
-        speakers,
-        duration: null // TODO: Implement audio duration detection
-      };
-
-      return NextResponse.json(response);
-
-    } catch (processingError) {
-      // Update document status to failed
-      await supabase
-        .from('documents')
-        .update({ processing_status: 'error' })
-        .eq('id', documentId);
-
-      console.error('Audio processing error:', processingError);
-      return NextResponse.json(
-        { error: 'Failed to process audio file' },
-        { status: 500 }
-      );
-    }
-
-  } catch (error) {
-    console.error('Audio upload error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
-  }
-}
-
-export async function GET(request: NextRequest) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const userId = searchParams.get('userId');
-    const folderId = searchParams.get('folderId');
-    const limit = parseInt(searchParams.get('limit') || '20');
-    const offset = parseInt(searchParams.get('offset') || '0');
-
-    if (!userId) {
-      return NextResponse.json(
-        { error: 'User ID is required' },
+        { error: 'Unable to extract sufficient content from audio file' },
         { status: 400 }
       );
     }
 
-    // Fetch audio documents (filter by audio file types)
-    const audioTypes = [
-      'audio/mpeg',
-      'audio/mp3',
-      'audio/wav',
-      'audio/m4a',
-      'audio/mp4',
-      'audio/ogg',
-      'audio/flac',
-      'audio/webm',
-      'audio/aac'
-    ];
+    // Generate audio summary
+    console.log('Starting summary generation...');
+    const { summary, keyPoints, speakers } = await generateAudioSummary(
+      transcript,
+      summaryType,
+      language,
+      audioType as any
+    );
+    console.log('Summary generation completed successfully');
 
-    let query = supabase
-      .from('documents')
-      .select(`
-        *,
-        summaries!inner(
-          id,
-          summary_type,
-          content,
-          key_points,
-          processing_status,
-          metadata,
-          created_at
-        )
-      `)
-      .eq('user_id', userId)
-      .in('file_type', audioTypes)
-      .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1);
+    // Save to database
+    let audioFileId: string | null = null;
+    let transcriptId: string | null = null;
+    let summaryId: string | null = null;
 
-    if (folderId) {
-      query = query.eq('folder_id', folderId);
-    }
-
-    const { data: audioDocuments, error } = await query;
-
-    if (error) {
-      console.error('Error fetching audio documents:', error);
-      return NextResponse.json(
-        { error: 'Failed to fetch audio documents' },
-        { status: 500 }
+    try {
+      // Save audio file metadata
+      audioFileId = await saveAudioFile(
+        userId,
+        file.name,
+        file.size,
+        file.type,
+        language,
+        audioType
       );
+
+      // Save transcript
+      transcriptId = await saveTranscript(
+        audioFileId,
+        userId,
+        transcript,
+        language
+      );
+
+      // Generate a title from the first few words of the summary
+      const title = summary.split(' ').slice(0, 8).join(' ') + (summary.split(' ').length > 8 ? '...' : '');
+
+      // Save summary
+      summaryId = await saveSummary(
+        audioFileId,
+        transcriptId,
+        userId,
+        title,
+        summary,
+        keyPoints,
+        'medium',
+        language
+      );
+    } catch (dbError) {
+      console.error('Database operation failed:', dbError);
+      // Continue with response even if database save fails
     }
 
-    return NextResponse.json({
-      audios: audioDocuments || [],
-      total: audioDocuments?.length || 0
-    });
+    // Return response with database IDs if available
+    const response = {
+      success: true,
+      fileName: file.name,
+      fileType: file.type,
+      fileSize: file.size,
+      language,
+      transcript,
+      summary: {
+        content: summary,
+        keyPoints,
+        summaryType,
+        language,
+        wordCount: summary.split(/\s+/).length
+      },
+      speakers,
+      wordCount: transcript.split(/\s+/).length,
+      processedAt: new Date().toISOString(),
+      // Include database IDs if saved successfully
+      ...(audioFileId && { audioFileId }),
+      ...(transcriptId && { transcriptId }),
+      ...(summaryId && { summaryId })
+    };
+
+    return NextResponse.json(response);
 
   } catch (error) {
-    console.error('Get audio documents error:', error);
+    console.error('Audio processing error:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Failed to process audio file: ' + (error as Error).message },
       { status: 500 }
     );
   }
 }
+
+// GET endpoint removed - simplified API only supports POST for transcribe-then-summarize

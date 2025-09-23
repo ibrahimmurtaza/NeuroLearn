@@ -105,56 +105,193 @@ class VideoProcessingService {
   }
 
   /**
-   * Process YouTube video by URL
+   * Process YouTube video with enhanced error handling
    */
   async processYouTubeVideo(
     videoUrl: string,
     options: ProcessingOptions = {}
   ): Promise<ProcessingResult> {
     const { onProgress } = options;
+    let lastError: Error | null = null;
     
     try {
       onProgress?.({ stage: 'metadata', progress: 10, message: 'Extracting video metadata...' });
       
-      // Extract video metadata
-      const metadata = await this.extractYouTubeMetadata(videoUrl);
+      // Extract video metadata with retry logic
+      let metadata: VideoMetadata;
+      try {
+        metadata = await this.extractYouTubeMetadata(videoUrl);
+      } catch (error: any) {
+        lastError = error;
+        this.errorHandler.createError(ErrorType.EXTERNAL_API_ERROR, error.message, {
+          severity: ErrorSeverity.HIGH,
+          details: {
+            videoUrl,
+            stage: 'metadata_extraction'
+          },
+          originalError: error
+        });
+        
+        // Fallback: create basic metadata from URL
+        const videoId = this.extractYouTubeVideoId(videoUrl);
+        metadata = {
+          title: `YouTube Video ${videoId}`,
+          duration: 0,
+          format: 'unknown',
+          thumbnailUrl: `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`
+        };
+        
+        onProgress?.({ 
+          stage: 'metadata', 
+          progress: 15, 
+          message: 'Using fallback metadata (original extraction failed)' 
+        });
+      }
       
       onProgress?.({ stage: 'transcription', progress: 30, message: 'Downloading transcript...' });
       
-      // Get transcript using youtube-transcript-api
-      const transcripts = await this.getYouTubeTranscript(videoUrl);
+      // Get transcript with enhanced fallback mechanisms
+      let transcripts: Array<{
+        start_time: number;
+        end_time: number;
+        text: string;
+        confidence?: number;
+      }> = [];
+      
+      try {
+        transcripts = await this.getYouTubeTranscriptWithFallbacks(videoUrl, onProgress);
+      } catch (error: any) {
+        lastError = error;
+        this.errorHandler.createError(ErrorType.EXTERNAL_API_ERROR, error.message, {
+          severity: ErrorSeverity.HIGH,
+          details: {
+            videoUrl,
+            stage: 'transcript_extraction'
+          },
+          originalError: error
+        });
+        
+        // If no transcript is available, we can't proceed with summarization
+        if (transcripts.length === 0) {
+          throw new Error(
+            'Unable to extract transcript from video. This video may not have captions available, ' +
+            'or the video may be private/restricted. Please try a different video or upload a video file directly.'
+          );
+        }
+      }
+      
+      if (transcripts.length === 0) {
+        throw new Error(
+          'No transcript content found. This video may not have captions available. ' +
+          'Please try a video with captions or upload a video file for audio transcription.'
+        );
+      }
       
       onProgress?.({ stage: 'summarization', progress: 60, message: 'Generating summary...' });
       
-      // Generate summary from transcript
-      const summary = await this.generateSummary(transcripts.map(t => t.text).join(' '), options.summaryLength);
+      // Generate summary from transcript with error handling
+      let summary: string;
+      try {
+        const transcriptText = transcripts.map(t => t.text).join(' ');
+        if (transcriptText.trim().length < 50) {
+          throw new Error('Transcript too short for meaningful summarization');
+        }
+        summary = await this.generateSummary(transcriptText, options.summaryLength);
+      } catch (error: any) {
+        lastError = error;
+        this.errorHandler.createError(ErrorType.PROCESSING_ERROR, error.message, {
+          severity: ErrorSeverity.MEDIUM,
+          details: {
+            videoUrl,
+            stage: 'summarization',
+            transcriptLength: transcripts.length
+          },
+          originalError: error
+        });
+        
+        // Fallback: create basic summary
+        summary = this.createFallbackSummary(transcripts);
+        onProgress?.({ 
+          stage: 'summarization', 
+          progress: 70, 
+          message: 'Using fallback summary generation (AI service unavailable)' 
+        });
+      }
       
-      onProgress?.({ stage: 'storage', progress: 80, message: 'Uploading to storage...' });
+      onProgress?.({ stage: 'storage', progress: 80, message: 'Processing media assets...' });
       
-      // Extract and upload thumbnail if needed
+      // Extract and upload thumbnail with error handling
       let thumbnailUrl = metadata.thumbnailUrl;
       if (options.extractFrames) {
-        thumbnailUrl = await this.extractAndUploadThumbnail(videoUrl);
+        try {
+          thumbnailUrl = await this.extractAndUploadThumbnail(videoUrl);
+        } catch (error: any) {
+          lastError = error;
+          this.errorHandler.createError(ErrorType.PROCESSING_ERROR, error.message, {
+            severity: ErrorSeverity.LOW,
+            details: {
+              videoUrl,
+              stage: 'thumbnail_extraction'
+            },
+            originalError: error
+          });
+          // Continue with default thumbnail
+          onProgress?.({ 
+            stage: 'storage', 
+            progress: 85, 
+            message: 'Using default thumbnail (frame extraction failed)' 
+          });
+        }
       }
       
       onProgress?.({ stage: 'database', progress: 90, message: 'Saving to database...' });
       
-      // Save to database
-      const result = await this.saveToDatabase({
-        title: metadata.title,
-        summary,
-        transcripts,
-        metadata,
-        videoUrl,
-        thumbnailUrl,
-        userId: options.userId
-      });
+      // Save to database with error handling
+      let result: ProcessingResult;
+      try {
+        result = await this.saveToDatabase({
+          title: metadata.title,
+          summary,
+          transcripts,
+          metadata,
+          videoUrl,
+          thumbnailUrl,
+          userId: options.userId
+        });
+      } catch (error: any) {
+        this.errorHandler.createError(ErrorType.DATABASE_ERROR, error.message, {
+          severity: ErrorSeverity.HIGH,
+          details: {
+            videoUrl,
+            stage: 'database_save'
+          },
+          originalError: error
+        });
+        throw new Error(`Failed to save video summary to database: ${error.message}`);
+      }
       
       onProgress?.({ stage: 'completed', progress: 100, message: 'Processing completed successfully!' });
+      
+      // Log warning if there were non-fatal errors
+      if (lastError) {
+        console.warn('Video processing completed with warnings:', lastError.message);
+      }
       
       return result;
       
     } catch (error: any) {
+      this.errorHandler.createError(
+        ErrorType.PROCESSING_ERROR,
+        error.message,
+        {
+          severity: ErrorSeverity.HIGH,
+          context: {
+            stage: 'overall_processing'
+          },
+          originalError: error
+        }
+      );
+      
       onProgress?.({ 
         stage: 'error', 
         progress: 0, 
@@ -278,43 +415,257 @@ class VideoProcessingService {
   }
 
   /**
-   * Get YouTube transcript
+   * Get YouTube transcript with enhanced fallback mechanisms
    */
-  private async getYouTubeTranscript(videoUrl: string): Promise<Array<{
+  private async getYouTubeTranscriptWithFallbacks(
+    videoUrl: string, 
+    onProgress?: (progress: ProcessingProgress) => void
+  ): Promise<Array<{
     start_time: number;
     end_time: number;
     text: string;
     confidence?: number;
   }>> {
-    // Try yt-dlp first as it's more reliable for server environments
+    const errors: Error[] = [];
+    
+    // Method 1: Try yt-dlp first (most reliable for server environments)
     try {
+      onProgress?.({ stage: 'transcription', progress: 35, message: 'Trying yt-dlp transcript extraction...' });
       const transcript = await this.extractTranscriptWithYtDlp(videoUrl);
       if (transcript.length > 0) {
+        onProgress?.({ stage: 'transcription', progress: 50, message: 'Successfully extracted transcript with yt-dlp' });
         return transcript;
       }
-    } catch (error) {
-      console.warn('yt-dlp transcript extraction failed:', error);
+    } catch (error: any) {
+      errors.push(error);
+      console.warn('yt-dlp transcript extraction failed:', error.message);
     }
 
-    // Fallback to youtube-transcript package
+    // Method 2: Try youtube-transcript package
     try {
+      onProgress?.({ stage: 'transcription', progress: 40, message: 'Trying youtube-transcript package...' });
       const transcript = await YoutubeTranscript.fetchTranscript(videoUrl);
       
-      if (!transcript || transcript.length === 0) {
-        console.warn('No transcript found for video:', videoUrl);
+      if (transcript && transcript.length > 0) {
+        const formattedTranscript = transcript.map((item, index) => ({
+          start_time: Math.floor(item.offset / 1000), // Convert milliseconds to seconds
+          end_time: Math.floor((item.offset + item.duration) / 1000),
+          text: item.text.trim(),
+          confidence: 0.95 // Default confidence for YouTube transcripts
+        }));
+        
+        onProgress?.({ stage: 'transcription', progress: 50, message: 'Successfully extracted transcript with youtube-transcript' });
+        return formattedTranscript;
+      }
+    } catch (error: any) {
+      errors.push(error);
+      console.warn('youtube-transcript extraction failed:', error.message);
+    }
+
+    // Method 3: Try alternative yt-dlp command with different options
+    try {
+      onProgress?.({ stage: 'transcription', progress: 45, message: 'Trying alternative yt-dlp options...' });
+      const transcript = await this.extractTranscriptWithYtDlpAlternative(videoUrl);
+      if (transcript.length > 0) {
+        onProgress?.({ stage: 'transcription', progress: 50, message: 'Successfully extracted transcript with alternative method' });
+        return transcript;
+      }
+    } catch (error: any) {
+      errors.push(error);
+      console.warn('Alternative yt-dlp extraction failed:', error.message);
+    }
+
+    // All methods failed
+    const errorMessages = errors.map(e => e.message).join('; ');
+    throw new Error(`All transcript extraction methods failed: ${errorMessages}`);
+  }
+
+  /**
+   * Alternative yt-dlp extraction with different parameters
+   */
+  private async extractTranscriptWithYtDlpAlternative(videoUrl: string): Promise<Array<{
+    start_time: number;
+    end_time: number;
+    text: string;
+    confidence?: number;
+  }>> {
+    const { exec } = require('child_process');
+    const { promisify } = require('util');
+    const execAsync = promisify(exec);
+    const fs = require('fs');
+    const path = require('path');
+    
+    try {
+      // Extract video ID from URL
+      const videoId = this.extractYouTubeVideoId(videoUrl);
+      if (!videoId) {
+        throw new Error('Invalid YouTube URL');
+      }
+      
+      // Use yt-dlp with more aggressive subtitle extraction
+      const tempDir = require('os').tmpdir();
+      const outputPath = path.join(tempDir, `${videoId}_alt.%(ext)s`);
+      
+      // Try multiple subtitle languages and formats
+      const command = `yt-dlp --write-auto-sub --write-sub --all-subs --skip-download --sub-format "vtt/srt/ass" -o "${outputPath}" "${videoUrl}"`;
+      
+      console.log('Executing alternative yt-dlp command:', command);
+      const { stdout, stderr } = await execAsync(command, { timeout: 30000 }); // 30 second timeout
+      
+      // Look for any VTT or SRT files
+      const subtitleFiles = [
+        path.join(tempDir, `${videoId}_alt.en.vtt`),
+        path.join(tempDir, `${videoId}_alt.en-US.vtt`),
+        path.join(tempDir, `${videoId}_alt.en-GB.vtt`),
+        path.join(tempDir, `${videoId}_alt.en.srt`),
+        path.join(tempDir, `${videoId}_alt.en-US.srt`),
+        path.join(tempDir, `${videoId}_alt.en-GB.srt`)
+      ];
+      
+      let subtitleContent = '';
+      let isVTT = false;
+      
+      for (const subtitleFile of subtitleFiles) {
+        if (fs.existsSync(subtitleFile)) {
+          subtitleContent = fs.readFileSync(subtitleFile, 'utf8');
+          isVTT = subtitleFile.endsWith('.vtt');
+          fs.unlinkSync(subtitleFile); // Clean up
+          break;
+        }
+      }
+      
+      if (!subtitleContent) {
+        console.warn('No subtitle files found with alternative method');
         return [];
       }
       
-      return transcript.map((item, index) => ({
-        start_time: Math.floor(item.offset / 1000), // Convert milliseconds to seconds
-        end_time: Math.floor((item.offset + item.duration) / 1000),
-        text: item.text.trim(),
-        confidence: 0.95 // Default confidence for YouTube transcripts
-      }));
+      // Parse content based on format
+      return isVTT ? this.parseVTTContent(subtitleContent) : this.parseSRTContent(subtitleContent);
+      
     } catch (error) {
-      console.error('Error fetching YouTube transcript:', error);
+      console.error('Alternative yt-dlp transcript extraction failed:', error);
       return [];
     }
+  }
+
+  /**
+   * Parse SRT subtitle content
+   */
+  private parseSRTContent(srtContent: string): Array<{
+    start_time: number;
+    end_time: number;
+    text: string;
+    confidence?: number;
+  }> {
+    const segments: Array<{
+      start_time: number;
+      end_time: number;
+      text: string;
+      confidence?: number;
+    }> = [];
+    
+    const blocks = srtContent.split('\n\n').filter(block => block.trim());
+    
+    for (const block of blocks) {
+      const lines = block.split('\n');
+      if (lines.length >= 3) {
+        const timeLine = lines[1];
+        const textLines = lines.slice(2);
+        
+        // Parse timestamp line (format: 00:00:00,000 --> 00:00:05,000)
+        const timeMatch = timeLine.match(/(\d{2}:\d{2}:\d{2},\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2},\d{3})/);
+        if (timeMatch) {
+          const startTime = this.parseSRTTimestamp(timeMatch[1]);
+          const endTime = this.parseSRTTimestamp(timeMatch[2]);
+          const text = textLines.join(' ').replace(/<[^>]*>/g, '').trim();
+          
+          if (text && startTime >= 0 && endTime >= 0) {
+            segments.push({
+              start_time: Math.floor(startTime),
+              end_time: Math.floor(endTime),
+              text,
+              confidence: 0.9
+            });
+          }
+        }
+      }
+    }
+    
+    return segments;
+  }
+
+  /**
+   * Parse SRT timestamp to seconds
+   */
+  private parseSRTTimestamp(timestamp: string): number {
+    try {
+      const [time, ms] = timestamp.split(',');
+      const [hours, minutes, seconds] = time.split(':').map(Number);
+      return hours * 3600 + minutes * 60 + seconds + Number(ms) / 1000;
+    } catch {
+      return -1;
+    }
+  }
+
+  /**
+   * Create fallback summary when AI service fails
+   */
+  private createFallbackSummary(transcripts: Array<{
+    start_time: number;
+    end_time: number;
+    text: string;
+    confidence?: number;
+  }>): string {
+    if (transcripts.length === 0) {
+      return 'No transcript available for summarization.';
+    }
+
+    // Extract key information from transcript
+    const fullText = transcripts.map(t => t.text).join(' ');
+    const words = fullText.split(/\s+/);
+    const totalWords = words.length;
+    const duration = transcripts[transcripts.length - 1]?.end_time || 0;
+
+    // Create basic summary with key statistics
+    let summary = `Video Summary (${Math.floor(duration / 60)}:${(duration % 60).toString().padStart(2, '0')} duration, ${totalWords} words):\n\n`;
+
+    // Extract first few sentences as introduction
+    const sentences = fullText.split(/[.!?]+/).filter(s => s.trim().length > 10);
+    if (sentences.length > 0) {
+      summary += `Introduction: ${sentences[0].trim()}.\n\n`;
+    }
+
+    // Find potential key topics (words that appear frequently)
+    const wordFreq: { [key: string]: number } = {};
+    words.forEach(word => {
+      const cleanWord = word.toLowerCase().replace(/[^\w]/g, '');
+      if (cleanWord.length > 3) {
+        wordFreq[cleanWord] = (wordFreq[cleanWord] || 0) + 1;
+      }
+    });
+
+    const keyWords = Object.entries(wordFreq)
+      .filter(([word, freq]) => freq > 2)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 5)
+      .map(([word]) => word);
+
+    if (keyWords.length > 0) {
+      summary += `Key topics discussed: ${keyWords.join(', ')}\n\n`;
+    }
+
+    // Add middle section if available
+    if (sentences.length > 2) {
+      const midIndex = Math.floor(sentences.length / 2);
+      summary += `Main content: ${sentences[midIndex].trim()}.\n\n`;
+    }
+
+    // Add conclusion if available
+    if (sentences.length > 1) {
+      summary += `Conclusion: ${sentences[sentences.length - 1].trim()}.`;
+    }
+
+    return summary;
   }
 
   /**
@@ -731,6 +1082,154 @@ class VideoProcessingService {
       videoUrl: data.video_url,
       thumbnailUrl: data.thumbnail_url
     };
+  }
+
+  /**
+   * Get YouTube transcript (backward compatibility method)
+   */
+  private async getYouTubeTranscript(videoUrl: string): Promise<Array<{
+    start_time: number;
+    end_time: number;
+    text: string;
+    confidence?: number;
+  }>> {
+    return this.getYouTubeTranscriptWithFallbacks(videoUrl);
+  }
+
+  /**
+   * Enhanced metadata extraction with retry logic
+   */
+  private async extractYouTubeMetadataWithRetry(videoUrl: string, maxRetries: number = 3): Promise<VideoMetadata> {
+    let lastError: Error | null = null;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        // Try to get basic info using yt-dlp
+        const videoId = this.extractYouTubeVideoId(videoUrl);
+        if (!videoId) {
+          throw new Error('Invalid YouTube URL format');
+        }
+
+        // Try to extract metadata using yt-dlp
+        const { exec } = require('child_process');
+        const { promisify } = require('util');
+        const execAsync = promisify(exec);
+        
+        const command = `yt-dlp --dump-json --no-download "${videoUrl}"`;
+        const { stdout } = await execAsync(command, { timeout: 15000 });
+        
+        const metadata = JSON.parse(stdout);
+        
+        return {
+          title: metadata.title || `YouTube Video ${videoId}`,
+          duration: metadata.duration || 0,
+          format: 'youtube',
+          resolution: metadata.width && metadata.height ? `${metadata.width}x${metadata.height}` : undefined,
+          thumbnailUrl: metadata.thumbnail || `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`
+        };
+        
+      } catch (error: any) {
+        lastError = error;
+        console.warn(`Metadata extraction attempt ${attempt} failed:`, error.message);
+        
+        if (attempt < maxRetries) {
+          // Wait before retry (exponential backoff)
+          await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000));
+        }
+      }
+    }
+    
+    // If all attempts failed, return basic metadata
+    const videoId = this.extractYouTubeVideoId(videoUrl);
+    console.warn('All metadata extraction attempts failed, using fallback metadata');
+    
+    return {
+      title: `YouTube Video ${videoId}`,
+      duration: 0,
+      format: 'youtube',
+      thumbnailUrl: `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`
+    };
+  }
+
+  /**
+   * Validate video URL and extract basic info
+   */
+  private validateAndParseVideoUrl(videoUrl: string): { videoId: string; isValid: boolean } {
+    try {
+      const videoId = this.extractYouTubeVideoId(videoUrl);
+      
+      if (!videoId || videoId.length !== 11) {
+        return { videoId: '', isValid: false };
+      }
+      
+      // Additional validation - check if URL is accessible
+      const validPatterns = [
+        /^https?:\/\/(www\.)?(youtube\.com|youtu\.be)/,
+        /youtube\.com\/watch\?v=/,
+        /youtu\.be\//
+      ];
+      
+      const isValidFormat = validPatterns.some(pattern => pattern.test(videoUrl));
+      
+      return { videoId, isValid: isValidFormat };
+    } catch (error) {
+      return { videoId: '', isValid: false };
+    }
+  }
+
+  /**
+   * Check if required services are available
+   */
+  private async checkServiceAvailability(): Promise<{
+    ytDlp: boolean;
+    ffmpeg: boolean;
+    openai: boolean;
+    supabase: boolean;
+  }> {
+    const availability = {
+      ytDlp: false,
+      ffmpeg: false,
+      openai: false,
+      supabase: false
+    };
+
+    // Check yt-dlp
+    try {
+      const { exec } = require('child_process');
+      const { promisify } = require('util');
+      const execAsync = promisify(exec);
+      await execAsync('yt-dlp --version', { timeout: 5000 });
+      availability.ytDlp = true;
+    } catch (error) {
+      console.warn('yt-dlp not available:', error);
+    }
+
+    // Check FFmpeg
+    try {
+      const { exec } = require('child_process');
+      const { promisify } = require('util');
+      const execAsync = promisify(exec);
+      await execAsync('ffmpeg -version', { timeout: 5000 });
+      availability.ffmpeg = true;
+    } catch (error) {
+      console.warn('FFmpeg not available:', error);
+    }
+
+    // Check OpenAI
+    try {
+      availability.openai = !!process.env.OPENAI_API_KEY;
+    } catch (error) {
+      console.warn('OpenAI API key not available');
+    }
+
+    // Check Supabase
+    try {
+      availability.supabase = !!(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
+    } catch (error) {
+      console.warn('Supabase configuration not available');
+    }
+
+    return availability;
   }
 }
 

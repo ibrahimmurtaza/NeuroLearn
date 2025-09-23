@@ -184,8 +184,8 @@ export default function LoginPage() {
                 </Link>
               </div>
               
-              <Button type="submit" className="w-full" loading={loading}>
-                Sign In
+              <Button type="submit" className="w-full" disabled={loading}>
+                {loading ? 'Signing In...' : 'Sign In'}
               </Button>
             </form>
             

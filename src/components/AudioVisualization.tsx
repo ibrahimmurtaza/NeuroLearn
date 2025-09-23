@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { AudioVisualizationProps } from '@/types/voice';
+import { AudioVisualizationProps, TranscriptionMethod } from '@/types/voice';
 import { cn } from '@/lib/utils';
 
 /**
@@ -178,7 +178,7 @@ export const VoiceInputIndicator: React.FC<{
   isRecording: boolean;
   audioLevel: number;
   transcript?: string;
-  transcriptionMethod?: 'web-speech' | 'whisper' | 'hybrid';
+  transcriptionMethod?: TranscriptionMethod;
   detectedLanguage?: string;
   confidence?: number;
   isProcessing?: boolean;

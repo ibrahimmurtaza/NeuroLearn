@@ -501,7 +501,7 @@ export async function GET(request: NextRequest) {
     const frames: FrameResponse[] = (framesData || []).map(frame => ({
       id: frame.id,
       timestamp: frame.timestamp,
-      frameUrl: frame.frame_url,
+      frameUrl: frame.frame_path,
       description: frame.description,
       analysisData: frame.analysis_data
     }));

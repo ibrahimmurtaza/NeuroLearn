@@ -55,11 +55,7 @@ export async function GET(request: NextRequest) {
         processing_status,
         created_at,
         updated_at,
-        folder_id,
-        folders (
-          id,
-          name
-        )
+        folder_id
       `)
       .eq('user_id', user.id)
       .order('created_at', { ascending: false });

@@ -1,0 +1,5 @@
+This is a test document for PDF conversion.
+
+It contains some sample text that should be properly extracted when converted to PDF and processed by the quiz generation system.
+
+The text extraction should work correctly now with the pdf-parse library implementation.

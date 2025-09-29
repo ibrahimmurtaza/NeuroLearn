@@ -48,7 +48,7 @@ interface ExtractFramesRequest {
 interface FrameResponse {
   id: string;
   timestamp: number;
-  frameUrl: string;
+  frame_url: string;
   description?: string;
   analysisData?: {
     objects?: string[];
@@ -374,7 +374,7 @@ export async function POST(request: NextRequest) {
           const frameResponse: FrameResponse = {
             id: frameId,
             timestamp: frame.timestamp,
-            frameUrl,
+            frame_url: frameUrl,
             description,
             analysisData
           };
@@ -501,7 +501,7 @@ export async function GET(request: NextRequest) {
     const frames: FrameResponse[] = (framesData || []).map(frame => ({
       id: frame.id,
       timestamp: frame.timestamp,
-      frameUrl: frame.frame_path,
+      frame_url: frame.frame_path,
       description: frame.description,
       analysisData: frame.analysis_data
     }));

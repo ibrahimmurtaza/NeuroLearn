@@ -1,350 +1,357 @@
-'use client'
+'use client';
 
-import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
-import { useAuth } from '@/contexts/AuthContext'
-import {
-  Calendar,
-  Clock,
-  MapPin,
-  Users,
-  Plus,
-  Filter,
-  ChevronLeft,
-  ChevronRight,
-  BookOpen,
-  AlertCircle,
-} from 'lucide-react'
+import { useState, useEffect } from 'react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card';
+import { Button } from '@/components/ui/Button';
+import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
+import { 
+  Calendar, 
+  CheckCircle, 
+  Clock, 
+  Plus, 
+  Target, 
+  TrendingUp,
+  Bell,
+  Settings,
+  BarChart3,
+  CalendarDays
+} from 'lucide-react';
+import Link from 'next/link';
+import { toast } from 'sonner';
 
-export default function Schedule() {
-  const { user, loading } = useAuth()
-  const router = useRouter()
-  const [currentDate, setCurrentDate] = useState(new Date())
-  const [viewMode, setViewMode] = useState('week')
-  const [selectedDate, setSelectedDate] = useState(new Date())
-  const [filterType, setFilterType] = useState('all')
+interface DashboardStats {
+  task_analytics: {
+    total_tasks: number;
+    completed_tasks: number;
+    completion_rate: string;
+    priority_breakdown: {
+      high: number;
+      medium: number;
+      low: number;
+    };
+  };
+  goal_analytics: {
+    total_goals: number;
+    active_goals: number;
+    completed_goals: number;
+    goal_completion_rate: string;
+  };
+  weekly_progress: Array<{
+    date: string;
+    completed_tasks: number;
+    total_tasks: number;
+    completion_rate: string;
+  }>;
+}
+
+interface RecentTask {
+  id: string;
+  title: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'cancelled';
+  priority: 'low' | 'medium' | 'high';
+  due_date?: string;
+  goals?: {
+    title: string;
+    category: string;
+  };
+}
+
+interface Notification {
+  id: string;
+  title: string;
+  message: string;
+  type: string;
+  created_at: string;
+  status: 'pending' | 'read';
+}
+
+export default function ScheduleDashboard() {
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [recentTasks, setRecentTasks] = useState<RecentTask[]>([]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!loading && !user) {
-      router.push('/auth/login')
+    fetchDashboardData();
+  }, []);
+
+  const fetchDashboardData = async () => {
+    try {
+      setLoading(true);
+      
+      // Fetch all data in parallel instead of sequentially
+      const [analyticsResponse, tasksResponse, notificationsResponse] = await Promise.allSettled([
+        fetch('/api/schedule/analytics?type=overview&period=7d'),
+        fetch('/api/schedule/tasks?limit=5'),
+        fetch('/api/schedule/notifications?limit=3&status=pending')
+      ]);
+
+      // Process analytics
+      if (analyticsResponse.status === 'fulfilled' && analyticsResponse.value.ok) {
+        const analyticsData = await analyticsResponse.value.json();
+        setStats(analyticsData.analytics);
+      } else if (analyticsResponse.status === 'rejected') {
+        console.error('Analytics fetch failed:', analyticsResponse.reason);
+      }
+
+      // Process tasks
+      if (tasksResponse.status === 'fulfilled' && tasksResponse.value.ok) {
+        const tasksData = await tasksResponse.value.json();
+        setRecentTasks(tasksData.tasks || []);
+      } else if (tasksResponse.status === 'rejected') {
+        console.error('Tasks fetch failed:', tasksResponse.reason);
+      }
+
+      // Process notifications
+      if (notificationsResponse.status === 'fulfilled' && notificationsResponse.value.ok) {
+        const notificationsData = await notificationsResponse.value.json();
+        setNotifications(notificationsData.notifications || []);
+      } else if (notificationsResponse.status === 'rejected') {
+        console.error('Notifications fetch failed:', notificationsResponse.reason);
+      }
+    } catch (error) {
+      console.error('Error fetching dashboard data:', error);
+      toast.error('Failed to load dashboard data');
+    } finally {
+      setLoading(false);
     }
-  }, [user, loading, router])
+  };
+
+  const getPriorityColor = (priority: string) => {
+    switch (priority) {
+      case 'high': return 'bg-red-100 text-red-800';
+      case 'medium': return 'bg-yellow-100 text-yellow-800';
+      case 'low': return 'bg-green-100 text-green-800';
+      default: return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'completed': return 'bg-green-100 text-green-800';
+      case 'in_progress': return 'bg-blue-100 text-blue-800';
+      case 'pending': return 'bg-gray-100 text-gray-800';
+      case 'cancelled': return 'bg-red-100 text-red-800';
+      default: return 'bg-gray-100 text-gray-800';
+    }
+  };
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-primary"></div>
+      <div className="container mx-auto p-6">
+        <div className="animate-pulse space-y-6">
+          <div className="h-8 bg-gray-200 rounded w-1/4"></div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className="h-32 bg-gray-200 rounded"></div>
+            ))}
+          </div>
+        </div>
       </div>
-    )
-  }
-
-  if (!user) {
-    return null
-  }
-
-  const events = [
-    {
-      id: 1,
-      title: 'Machine Learning Lecture',
-      course: 'CS 4641',
-      type: 'lecture',
-      startTime: '2024-01-15T10:00:00',
-      endTime: '2024-01-15T11:30:00',
-      location: 'Klaus 1116',
-      instructor: 'Dr. Smith',
-      description: 'Introduction to Neural Networks',
-      color: 'bg-blue-500',
-    },
-    {
-      id: 2,
-      title: 'Assignment Due: Data Structures',
-      course: 'CS 1332',
-      type: 'assignment',
-      startTime: '2024-01-15T23:59:00',
-      endTime: '2024-01-15T23:59:00',
-      location: 'Online',
-      description: 'Binary Search Tree Implementation',
-      color: 'bg-red-500',
-      priority: 'high',
-    },
-    {
-      id: 3,
-      title: 'Study Group: Linear Algebra',
-      course: 'MATH 1554',
-      type: 'study-group',
-      startTime: '2024-01-15T15:00:00',
-      endTime: '2024-01-15T17:00:00',
-      location: 'Library Room 204',
-      participants: 6,
-      description: 'Eigenvalues and Eigenvectors Review',
-      color: 'bg-green-500',
-    },
-  ]
-
-  const viewModes = [
-    { value: 'day', label: 'Day' },
-    { value: 'week', label: 'Week' },
-    { value: 'month', label: 'Month' },
-  ]
-
-  const filterTypes = [
-    { value: 'all', label: 'All Events' },
-    { value: 'lecture', label: 'Lectures' },
-    { value: 'assignment', label: 'Assignments' },
-    { value: 'exam', label: 'Exams' },
-    { value: 'study-group', label: 'Study Groups' },
-    { value: 'lab', label: 'Labs' },
-  ]
-
-  const getEventTypeIcon = (type: string) => {
-    switch (type) {
-      case 'lecture':
-        return <BookOpen className="h-4 w-4" />
-      case 'assignment':
-        return <AlertCircle className="h-4 w-4" />
-      case 'exam':
-        return <AlertCircle className="h-4 w-4" />
-      case 'study-group':
-        return <Users className="h-4 w-4" />
-      case 'lab':
-        return <BookOpen className="h-4 w-4" />
-      case 'office-hours':
-        return <Clock className="h-4 w-4" />
-      case 'presentation':
-        return <Users className="h-4 w-4" />
-      default:
-        return <Calendar className="h-4 w-4" />
-    }
-  }
-
-  const formatTime = (dateString: string) => {
-    return new Date(dateString).toLocaleTimeString('en-US', {
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true,
-    })
-  }
-
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-    })
-  }
-
-  const getWeekDays = (date: Date) => {
-    const week = []
-    const startOfWeek = new Date(date)
-    const day = startOfWeek.getDay()
-    const diff = startOfWeek.getDate() - day
-    startOfWeek.setDate(diff)
-
-    for (let i = 0; i < 7; i++) {
-      const day = new Date(startOfWeek)
-      day.setDate(startOfWeek.getDate() + i)
-      week.push(day)
-    }
-    return week
-  }
-
-  const filteredEvents = events.filter(event => {
-    if (filterType === 'all') return true
-    return event.type === filterType
-  })
-
-  const getEventsForDate = (date: Date) => {
-    const dateStr = date.toISOString().split('T')[0]
-    return filteredEvents.filter(event => {
-      const eventDate = new Date(event.startTime).toISOString().split('T')[0]
-      return eventDate === dateStr
-    })
-  }
-
-  const navigateDate = (direction: 'prev' | 'next') => {
-    const newDate = new Date(currentDate)
-    if (viewMode === 'day') {
-      newDate.setDate(newDate.getDate() + (direction === 'next' ? 1 : -1))
-    } else if (viewMode === 'week') {
-      newDate.setDate(newDate.getDate() + (direction === 'next' ? 7 : -7))
-    } else if (viewMode === 'month') {
-      newDate.setMonth(newDate.getMonth() + (direction === 'next' ? 1 : -1))
-    }
-    setCurrentDate(newDate)
-  }
-
-  const getDateRangeText = () => {
-    if (viewMode === 'day') {
-      return currentDate.toLocaleDateString('en-US', {
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-      })
-    } else if (viewMode === 'week') {
-      const weekDays = getWeekDays(currentDate)
-      const start = weekDays[0].toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-      const end = weekDays[6].toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-      return `${start} - ${end}`
-    } else {
-      return currentDate.toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'long',
-      })
-    }
+    );
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8">
-          <div>
-            <h1 className="text-3xl font-bold text-foreground mb-2">Schedule</h1>
-            <p className="text-muted-foreground">
-              Manage your classes, assignments, and study sessions
+    <div className="container mx-auto p-6 space-y-6">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">Schedule Dashboard</h1>
+          <p className="text-gray-600 mt-1">Manage your goals, tasks, and productivity</p>
+        </div>
+        <div className="flex gap-2">
+          <Button asChild>
+            <Link href="/schedule/tasks">
+              <Plus className="w-4 h-4 mr-2" />
+              New Task
+            </Link>
+          </Button>
+          <Button variant="outline" asChild>
+            <Link href="/schedule/goals">
+              <Target className="w-4 h-4 mr-2" />
+              New Goal
+            </Link>
+          </Button>
+        </div>
+      </div>
+
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total Tasks</CardTitle>
+            <CheckCircle className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{stats?.task_analytics.total_tasks || 0}</div>
+            <p className="text-xs text-muted-foreground">
+              {stats?.task_analytics.completed_tasks || 0} completed
             </p>
-          </div>
-          <button className="flex items-center px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors mt-4 sm:mt-0">
-            <Plus className="h-4 w-4 mr-2" />
-            Add Event
-          </button>
-        </div>
+          </CardContent>
+        </Card>
 
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
-          <div className="flex items-center space-x-4">
-            <div className="flex space-x-1 bg-muted p-1 rounded-lg">
-              {viewModes.map((mode) => (
-                <button
-                  key={mode.value}
-                  onClick={() => setViewMode(mode.value)}
-                  className={`px-3 py-1 rounded-md text-sm transition-colors ${
-                    viewMode === mode.value
-                      ? 'bg-background text-foreground shadow-sm'
-                      : 'text-muted-foreground hover:text-foreground'
-                  }`}
-                >
-                  {mode.label}
-                </button>
-              ))}
-            </div>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Completion Rate</CardTitle>
+            <TrendingUp className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{stats?.task_analytics.completion_rate || 0}%</div>
+            <Progress 
+              value={parseFloat(stats?.task_analytics.completion_rate || '0')} 
+              className="mt-2" 
+            />
+          </CardContent>
+        </Card>
 
-            <div className="relative">
-              <Filter className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <select
-                value={filterType}
-                onChange={(e) => setFilterType(e.target.value)}
-                className="pl-10 pr-8 py-2 border border-border rounded-lg bg-background text-foreground focus-ring appearance-none"
-              >
-                {filterTypes.map((type) => (
-                  <option key={type.value} value={type.value}>
-                    {type.label}
-                  </option>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Active Goals</CardTitle>
+            <Target className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{stats?.goal_analytics.active_goals || 0}</div>
+            <p className="text-xs text-muted-foreground">
+              {stats?.goal_analytics.total_goals || 0} total goals
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Notifications</CardTitle>
+            <Bell className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{notifications.length}</div>
+            <p className="text-xs text-muted-foreground">Pending reminders</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Main Content Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Recent Tasks */}
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Clock className="w-5 h-5" />
+              Recent Tasks
+            </CardTitle>
+            <CardDescription>Your latest task activity</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {recentTasks.length > 0 ? (
+              <div className="space-y-3">
+                {recentTasks.map((task) => (
+                  <div key={task.id} className="flex items-center justify-between p-3 border rounded-lg">
+                    <div className="flex-1">
+                      <h4 className="font-medium">{task.title}</h4>
+                      {task.goals && (
+                        <p className="text-sm text-gray-600">{task.goals.title}</p>
+                      )}
+                      {task.due_date && (
+                        <p className="text-xs text-gray-500">
+                          Due: {new Date(task.due_date).toLocaleDateString()}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      <Badge className={getPriorityColor(task.priority)}>
+                        {task.priority}
+                      </Badge>
+                      <Badge className={getStatusColor(task.status)}>
+                        {task.status.replace('_', ' ')}
+                      </Badge>
+                    </div>
+                  </div>
                 ))}
-              </select>
-            </div>
-          </div>
-
-          <div className="flex items-center space-x-4">
-            <button
-              onClick={() => navigateDate('prev')}
-              className="p-2 hover:bg-muted rounded-lg transition-colors"
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </button>
-            <h2 className="text-lg font-semibold text-foreground min-w-[200px] text-center">
-              {getDateRangeText()}
-            </h2>
-            <button
-              onClick={() => navigateDate('next')}
-              className="p-2 hover:bg-muted rounded-lg transition-colors"
-            >
-              <ChevronRight className="h-4 w-4" />
-            </button>
-            <button
-              onClick={() => setCurrentDate(new Date())}
-              className="px-3 py-2 text-sm bg-secondary text-secondary-foreground rounded-lg hover:bg-secondary/80 transition-colors"
-            >
-              Today
-            </button>
-          </div>
-        </div>
-
-        <div className="space-y-4">
-          <div>
-            <h3 className="text-lg font-semibold text-foreground mb-4">
-              Events for {formatDate(currentDate.toISOString())}
-            </h3>
-            {getEventsForDate(currentDate).length === 0 ? (
-              <div className="bg-card rounded-lg border border-border card-shadow p-8 text-center">
-                <Calendar className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-foreground mb-2">No events scheduled</h3>
-                <p className="text-muted-foreground">You have a free day! Consider adding some study time.</p>
+                <Button variant="outline" className="w-full" asChild>
+                  <Link href="/schedule/tasks">View All Tasks</Link>
+                </Button>
               </div>
             ) : (
-              <div className="space-y-3">
-                {getEventsForDate(currentDate)
-                  .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())
-                  .map((event) => (
-                    <div
-                      key={event.id}
-                      className="bg-card rounded-lg border border-border card-shadow interactive cursor-pointer"
-                      onClick={() => router.push(`/schedule/events/${event.id}`)}
-                    >
-                      <div className="p-6">
-                        <div className="flex items-start space-x-4">
-                          <div className={`p-2 rounded-lg ${event.color.replace('bg-', 'bg-').replace('-500', '-100')} text-white`}>
-                            {getEventTypeIcon(event.type)}
-                          </div>
-                          <div className="flex-1">
-                            <div className="flex items-start justify-between mb-2">
-                              <div>
-                                <h3 className="text-lg font-semibold text-card-foreground">{event.title}</h3>
-                                <p className="text-sm text-muted-foreground">{event.course}</p>
-                              </div>
-                              {event.priority === 'high' && (
-                                <span className="px-2 py-1 text-xs font-medium rounded-full bg-red-100 text-red-700">
-                                  High Priority
-                                </span>
-                              )}
-                            </div>
-                            
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-muted-foreground mb-3">
-                              <div className="flex items-center">
-                                <Clock className="h-4 w-4 mr-2" />
-                                {formatTime(event.startTime)} - {formatTime(event.endTime)}
-                              </div>
-                              <div className="flex items-center">
-                                <MapPin className="h-4 w-4 mr-2" />
-                                {event.location}
-                              </div>
-                              {event.instructor && (
-                                <div className="flex items-center">
-                                  <Users className="h-4 w-4 mr-2" />
-                                  {event.instructor}
-                                </div>
-                              )}
-                              {event.participants && (
-                                <div className="flex items-center">
-                                  <Users className="h-4 w-4 mr-2" />
-                                  {event.participants} participants
-                                </div>
-                              )}
-                            </div>
-                            
-                            {event.description && (
-                              <p className="text-sm text-muted-foreground">{event.description}</p>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ))
-                }
+              <div className="text-center py-8">
+                <Clock className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                <p className="text-gray-600">No tasks yet</p>
+                <Button className="mt-4" asChild>
+                  <Link href="/schedule/tasks">
+                    <Plus className="w-4 h-4 mr-2" />
+                    Create Your First Task
+                  </Link>
+                </Button>
               </div>
             )}
-          </div>
+          </CardContent>
+        </Card>
+
+        {/* Quick Actions & Notifications */}
+        <div className="space-y-6">
+          {/* Quick Actions */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Quick Actions</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <Button className="w-full justify-start" asChild>
+                <Link href="/schedule/goals">
+                  <Target className="w-4 h-4 mr-2" />
+                  Manage Goals
+                </Link>
+              </Button>
+              <Button variant="outline" className="w-full justify-start" asChild>
+                <Link href="/schedule/tasks">
+                  <CheckCircle className="w-4 h-4 mr-2" />
+                  Task Manager
+                </Link>
+              </Button>
+              <Button variant="outline" className="w-full justify-start" asChild>
+                <Link href="/schedule/calendar">
+                  <CalendarDays className="w-4 h-4 mr-2" />
+                  Calendar Sync
+                </Link>
+              </Button>
+              <Button variant="outline" className="w-full justify-start" asChild>
+                <Link href="/schedule/analytics">
+                  <BarChart3 className="w-4 h-4 mr-2" />
+                  Analytics
+                </Link>
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* Recent Notifications */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Bell className="w-5 h-5" />
+                Notifications
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {notifications.length > 0 ? (
+                <div className="space-y-3">
+                  {notifications.map((notification) => (
+                    <div key={notification.id} className="p-3 border rounded-lg">
+                      <h4 className="font-medium text-sm">{notification.title}</h4>
+                      <p className="text-xs text-gray-600 mt-1">{notification.message}</p>
+                      <p className="text-xs text-gray-500 mt-2">
+                        {new Date(notification.created_at).toLocaleDateString()}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-4">
+                  <Bell className="w-8 h-8 text-gray-400 mx-auto mb-2" />
+                  <p className="text-sm text-gray-600">No new notifications</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </div>
       </div>
     </div>
-  )
+  );
 }

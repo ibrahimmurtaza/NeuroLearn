@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Calendar with Login</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .container {
+            background: #f5f5f5;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+        .button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        .button:hover {
+            background: #0056b3;
+        }
+        .error {
+            color: red;
+            background: #ffe6e6;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .success {
+            color: green;
+            background: #e6ffe6;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .task-list {
+            background: white;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .task-item {
+            border-bottom: 1px solid #eee;
+            padding: 10px 0;
+        }
+        .task-item:last-child {
+            border-bottom: none;
+        }
+        input {
+            padding: 8px;
+            margin: 5px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            width: 200px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Calendar Test with Authentication</h1>
+    
+    <div class="container">
+        <h2>Step 1: Login</h2>
+        <p>Use the test credentials we created:</p>
+        <div>
+            <input type="email" id="email" placeholder="Email" value="calendar-test@example.com">
+            <input type="password" id="password" placeholder="Password" value="testpassword123">
+            <button class="button" onclick="login()">Login</button>
+        </div>
+        <div id="loginStatus"></div>
+    </div>
+
+    <div class="container">
+        <h2>Step 2: Test Calendar API</h2>
+        <button class="button" onclick="testCalendarAPI()">Test Calendar API</button>
+        <div id="calendarStatus"></div>
+        <div id="tasksList"></div>
+    </div>
+
+    <div class="container">
+        <h2>Step 3: Open Calendar Page</h2>
+        <p>After successful login, you can open the calendar page:</p>
+        <button class="button" onclick="openCalendarPage()">Open Calendar Page</button>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script>
+        // Initialize Supabase client
+        const supabaseUrl = 'https://cgryfltmvaplsrawoktj.supabase.co';
+        const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNncnlmbHRtdmFwbHNyYXdva3RqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTczNDU4NDcsImV4cCI6MjA3MjkyMTg0N30.1TUCM4-UjgQl2T1I4iuH1z5Lg09KPY_T-vHkowwZOQI';
+        
+        const { createClient } = supabase;
+        const supabaseClient = createClient(supabaseUrl, supabaseAnonKey);
+
+        let currentUser = null;
+
+        async function login() {
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            const statusDiv = document.getElementById('loginStatus');
+
+            try {
+                statusDiv.innerHTML = '<div>Logging in...</div>';
+                
+                const { data, error } = await supabaseClient.auth.signInWithPassword({
+                    email: email,
+                    password: password
+                });
+
+                if (error) {
+                    statusDiv.innerHTML = `<div class="error">Login failed: ${error.message}</div>`;
+                    return;
+                }
+
+                currentUser = data.user;
+                statusDiv.innerHTML = `<div class="success">✅ Login successful!<br>User ID: ${data.user.id}<br>Email: ${data.user.email}</div>`;
+                
+            } catch (err) {
+                statusDiv.innerHTML = `<div class="error">Login error: ${err.message}</div>`;
+            }
+        }
+
+        async function testCalendarAPI() {
+            const statusDiv = document.getElementById('calendarStatus');
+            const tasksDiv = document.getElementById('tasksList');
+
+            if (!currentUser) {
+                statusDiv.innerHTML = '<div class="error">Please login first!</div>';
+                return;
+            }
+
+            try {
+                statusDiv.innerHTML = '<div>Testing calendar API...</div>';
+                
+                // Get current session to ensure we have valid auth
+                const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
+                
+                if (sessionError || !session) {
+                    statusDiv.innerHTML = '<div class="error">No valid session found. Please login again.</div>';
+                    return;
+                }
+
+                // Test the calendar API endpoint
+                const response = await fetch('/api/schedule/calendar/tasks?start_date=2025-10-01&end_date=2025-10-31&include_completed=true', {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${session.access_token}`
+                    }
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    statusDiv.innerHTML = `<div class="error">API call failed: ${response.status} ${response.statusText}<br>${errorText}</div>`;
+                    return;
+                }
+
+                const data = await response.json();
+                statusDiv.innerHTML = `<div class="success">✅ Calendar API working! Found ${data.events?.length || 0} events</div>`;
+                
+                if (data.events && data.events.length > 0) {
+                    let tasksHtml = '<div class="task-list"><h3>Tasks Found:</h3>';
+                    data.events.forEach((event, index) => {
+                        tasksHtml += `
+                            <div class="task-item">
+                                <strong>${event.title}</strong><br>
+                                <small>Start: ${new Date(event.start).toLocaleString()}</small><br>
+                                <small>Status: ${event.resource.status} | Priority: ${event.resource.priority}</small><br>
+                                <small>Goal: ${event.resource.goal?.title || 'No goal'}</small>
+                            </div>
+                        `;
+                    });
+                    tasksHtml += '</div>';
+                    tasksDiv.innerHTML = tasksHtml;
+                } else {
+                    tasksDiv.innerHTML = '<div>No tasks found in the specified date range.</div>';
+                }
+
+            } catch (err) {
+                statusDiv.innerHTML = `<div class="error">API test error: ${err.message}</div>`;
+            }
+        }
+
+        function openCalendarPage() {
+            if (!currentUser) {
+                alert('Please login first!');
+                return;
+            }
+            window.open('/schedule', '_blank');
+        }
+
+        // Check if user is already logged in
+        supabaseClient.auth.onAuthStateChange((event, session) => {
+            if (session && session.user) {
+                currentUser = session.user;
+                document.getElementById('loginStatus').innerHTML = 
+                    `<div class="success">✅ Already logged in as: ${session.user.email}</div>`;
+            }
+        });
+    </script>
+</body>
+</html>

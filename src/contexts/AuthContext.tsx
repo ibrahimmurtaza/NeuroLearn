@@ -22,8 +22,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    const supabaseClient = supabase();
     // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }: { data: { session: Session | null } }) => {
+    supabaseClient.auth.getSession().then(({ data: { session } }: { data: { session: Session | null } }) => {
       setSession(session)
       setUser(session?.user ?? null)
       setLoading(false)
@@ -32,7 +33,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Listen for auth changes
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (event: string, session: Session | null) => {
+    } = supabaseClient.auth.onAuthStateChange(async (event: string, session: Session | null) => {
       setSession(session)
       setUser(session?.user ?? null)
       setLoading(false)
@@ -42,7 +43,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({
+    const { error } = await supabase().auth.signInWithPassword({
       email,
       password,
     })
@@ -50,7 +51,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   const signUp = async (email: string, password: string, fullName: string) => {
-    const { error } = await supabase.auth.signUp({
+    const { error } = await supabase().auth.signUp({
       email,
       password,
       options: {
@@ -63,11 +64,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   const signOut = async () => {
-    await supabase.auth.signOut()
+    await supabase().auth.signOut()
   }
 
   const resetPassword = async (email: string) => {
-    const { error } = await supabase.auth.resetPasswordForEmail(email)
+    const { error } = await supabase().auth.resetPasswordForEmail(email)
     return { error }
   }
 

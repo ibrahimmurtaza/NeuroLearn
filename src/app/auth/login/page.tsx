@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
@@ -8,39 +8,65 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Eye, EyeOff, Mail, Lock, CheckCircle, AlertCircle } from 'lucide-react'
-import { validateEmail, getUserFriendlyErrorMessage, EmailValidationResult } from '@/lib/emailValidation'
+import { validateEmailBasic } from '@/lib/emailValidation'
 
 export default function LoginPage() {
-  const { signIn } = useAuth()
+  const { signIn, user, profile, profileExists, profileLoading } = useAuth()
   const router = useRouter()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [emailValidation, setEmailValidation] = useState<EmailValidationResult | null>(null)
-  const [emailValidating, setEmailValidating] = useState(false)
+  const [emailValid, setEmailValid] = useState<boolean | null>(null)
   const [emailTouched, setEmailTouched] = useState(false)
+  const [loginSuccess, setLoginSuccess] = useState(false)
 
-  const handleEmailChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Handle redirection after successful login
+  useEffect(() => {
+    if (loginSuccess && user && !profileLoading) {
+      // Determine the user's role with priority order
+      const effectiveRole = profile?.role || user.user_metadata?.role || user.user_metadata?.user_role || 'student'
+
+      // All users now go to the same routes with conditional rendering
+      if (profileExists) {
+        router.push('/dashboard')
+      } else {
+        router.push('/onboarding')
+      }
+
+      setLoginSuccess(false)
+    } else {
+      // Add timeout fallback for stuck profileLoading
+      if (loginSuccess && profileLoading && user) {
+        const timeoutId = setTimeout(() => {
+          // Check if we're still in the same state
+          if (loginSuccess && user && profileLoading) {
+            // Force redirect based on user metadata if profile is still loading
+            const fallbackRole = user.user_metadata?.role || user.user_metadata?.user_role || 'student'
+            
+            // All users go to onboarding if profile is still loading
+            router.push('/onboarding')
+            setLoginSuccess(false)
+          }
+        }, 2000)
+        
+        // Store timeout ID to clear it if normal redirect happens
+        return () => clearTimeout(timeoutId)
+      }
+    }
+  }, [loginSuccess, user, profile, profileExists, profileLoading, router])
+
+  const handleEmailChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newEmail = e.target.value
     setEmail(newEmail)
     setEmailTouched(true)
-    
+
     if (newEmail && newEmail.includes('@')) {
-      setEmailValidating(true)
-      try {
-        // For login, use client-side validation first, then server validation for domain checks
-        const result = await validateEmail(newEmail)
-        setEmailValidation(result)
-      } catch (error) {
-        console.error('Email validation error:', error)
-      } finally {
-        setEmailValidating(false)
-      }
+      const isValid = validateEmailBasic(newEmail)
+      setEmailValid(isValid)
     } else {
-      setEmailValidation(null)
-      setEmailValidating(false)
+      setEmailValid(null)
     }
   }
 
@@ -49,22 +75,21 @@ export default function LoginPage() {
     setLoading(true)
     setError('')
 
-    // Validate email before attempting login
-    if (emailValidation && !emailValidation.isValid) {
-      setError(getUserFriendlyErrorMessage(emailValidation))
+    if (emailValid === false) {
+      setError('Please enter a valid email address')
       setLoading(false)
       return
     }
 
     const { error } = await signIn(email, password)
-    
+
     if (error) {
       setError(error.message || 'Failed to sign in')
+      setLoading(false)
     } else {
-      router.push('/dashboard')
+      setLoginSuccess(true)
+      setLoading(false)
     }
-    
-    setLoading(false)
   }
 
   return (
@@ -93,7 +118,8 @@ export default function LoginPage() {
                   {error}
                 </div>
               )}
-              
+
+              {/* Email Field */}
               <div className="space-y-2">
                 <label htmlFor="email" className="text-sm font-medium text-foreground">
                   Email
@@ -107,8 +133,8 @@ export default function LoginPage() {
                     value={email}
                     onChange={handleEmailChange}
                     className={`pl-10 pr-10 ${
-                      emailTouched && emailValidation
-                        ? emailValidation.isValid
+                      emailTouched && emailValid !== null
+                        ? emailValid
                           ? 'border-green-500 focus:border-green-500'
                           : 'border-red-500 focus:border-red-500'
                         : ''
@@ -116,11 +142,8 @@ export default function LoginPage() {
                     required
                   />
                   <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
-                    {emailValidating && (
-                      <div className="animate-spin h-4 w-4 border-2 border-primary border-t-transparent rounded-full" />
-                    )}
-                    {!emailValidating && emailTouched && emailValidation && (
-                      emailValidation.isValid ? (
+                    {emailTouched && emailValid !== null && (
+                      emailValid ? (
                         <CheckCircle className="h-4 w-4 text-green-500" />
                       ) : (
                         <AlertCircle className="h-4 w-4 text-red-500" />
@@ -128,18 +151,19 @@ export default function LoginPage() {
                     )}
                   </div>
                 </div>
-                {emailTouched && emailValidation && !emailValidation.isValid && (
+                {emailTouched && emailValid === false && (
                   <p className="text-sm text-red-500 mt-1">
-                    {getUserFriendlyErrorMessage(emailValidation)}
+                    Please enter a valid email address
                   </p>
                 )}
-                {emailTouched && emailValidation && emailValidation.isValid && (
+                {emailTouched && emailValid === true && (
                   <p className="text-sm text-green-600 mt-1">
-                    ✓ Email verified
+                    ✓ Email format is valid
                   </p>
                 )}
               </div>
-              
+
+              {/* Password Field */}
               <div className="space-y-2">
                 <label htmlFor="password" className="text-sm font-medium text-foreground">
                   Password
@@ -164,7 +188,8 @@ export default function LoginPage() {
                   </button>
                 </div>
               </div>
-              
+
+              {/* Remember Me + Forgot Password */}
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-2">
                   <input
@@ -183,12 +208,13 @@ export default function LoginPage() {
                   Forgot password?
                 </Link>
               </div>
-              
+
               <Button type="submit" className="w-full" disabled={loading}>
                 {loading ? 'Signing In...' : 'Sign In'}
               </Button>
             </form>
-            
+
+            {/* Sign Up Link */}
             <div className="mt-6 text-center">
               <p className="text-sm text-muted-foreground">
                 Don&apos;t have an account?{' '}
@@ -199,7 +225,7 @@ export default function LoginPage() {
             </div>
           </CardContent>
         </Card>
-        
+
         {/* Demo credentials */}
         <div className="mt-6 p-4 bg-muted/50 rounded-lg">
           <p className="text-sm text-muted-foreground text-center mb-2">Demo Credentials:</p>

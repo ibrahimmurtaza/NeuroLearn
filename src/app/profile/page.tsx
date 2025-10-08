@@ -1,663 +1,460 @@
 'use client'
 
-import { useAuth } from '@/contexts/AuthContext'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { useEffect, useState } from 'react'
-import { User, Mail, Phone, MapPin, Calendar, Edit, Save, X, Camera, Shield, Bell, Palette, Globe, Download, Trash2, Eye, EyeOff } from 'lucide-react'
+import { useAuth } from '@/contexts/AuthContext'
+import { Button } from '@/components/ui/Button'
+import { Card } from '@/components/ui/Card'
+import { Input } from '@/components/ui/Input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
+import { Badge } from '@/components/ui/badge'
+import { Separator } from '@/components/ui/separator'
+import LoadingSpinner from '@/components/LoadingSpinner'
+import { Profile, ProfileFormData, InterestCategory } from '@/types/profile'
+import { 
+  User, 
+  BookOpen, 
+  Target, 
+  Heart, 
+  Edit3, 
+  Save, 
+  X, 
+  Calendar,
+  Mail,
+  MapPin,
+  Settings
+} from 'lucide-react'
 
-export default function Profile() {
-  const { user, loading } = useAuth()
+export default function ProfilePage() {
+  const { user, session, profile, profileLoading, refreshProfile } = useAuth()
   const router = useRouter()
+  
   const [isEditing, setIsEditing] = useState(false)
-  const [activeTab, setActiveTab] = useState('profile')
-  const [showPassword, setShowPassword] = useState(false)
-  const [profileData, setProfileData] = useState({
-    firstName: 'John',
-    lastName: 'Doe',
-    email: 'john.doe@gatech.edu',
-    phone: '+1 (555) 123-4567',
-    location: 'Atlanta, GA',
-    bio: 'Computer Science student at Georgia Tech with a passion for machine learning and artificial intelligence.',
-    dateOfBirth: '1999-05-15',
-    major: 'Computer Science',
-    year: 'Junior',
-    gpa: '3.85',
-    avatar: null as string | null,
-  })
+  const [formData, setFormData] = useState<Partial<ProfileFormData>>({})
+  const [interestCategories, setInterestCategories] = useState<InterestCategory[]>([])
+  const [selectedInterests, setSelectedInterests] = useState<string[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState<string | null>(null)
 
-  const [preferences, setPreferences] = useState({
-    theme: 'system',
-    language: 'en',
-    timezone: 'America/New_York',
-    emailNotifications: true,
-    pushNotifications: true,
-    weeklyDigest: true,
-    courseReminders: true,
-    assignmentDeadlines: true,
-    studyGroupInvites: true,
-  })
-
-  const [security, setSecurity] = useState({
-    currentPassword: '',
-    newPassword: '',
-    confirmPassword: '',
-    twoFactorEnabled: false,
-    loginAlerts: true,
-  })
-
+  // Redirect if user is not logged in
   useEffect(() => {
-    if (!loading && !user) {
+    if (!user) {
       router.push('/auth/login')
+      return
     }
-  }, [user, loading, router])
+    
+    if (!profileLoading && !profile) {
+      router.push('/onboarding')
+      return
+    }
+  }, [user, profile, profileLoading, router])
 
-  if (loading) {
+  // Initialize form data when profile loads
+  useEffect(() => {
+    if (profile) {
+      setFormData({
+        full_name: profile.full_name,
+        bio: profile.bio || '',
+        academic_field: profile.academic_field,
+        study_goals: profile.study_goals,
+        avatar_url: profile.avatar_url || '',
+        interests: profile.interests
+      })
+      setSelectedInterests(profile.interests || [])
+    }
+  }, [profile])
+
+  // Fetch interest categories
+  useEffect(() => {
+    const fetchInterestCategories = async () => {
+      try {
+        const response = await fetch('/api/interests/categories')
+        if (response.ok) {
+          const data = await response.json()
+          setInterestCategories(data.data)
+        }
+      } catch (error) {
+        console.error('Failed to fetch interest categories:', error)
+      }
+    }
+
+    fetchInterestCategories()
+  }, [])
+
+  const updateFormData = (field: keyof ProfileFormData, value: any) => {
+    setFormData(prev => ({ ...prev, [field]: value }))
+  }
+
+  const toggleInterest = (interest: string) => {
+    setSelectedInterests(prev => 
+      prev.includes(interest)
+        ? prev.filter(i => i !== interest)
+        : [...prev, interest]
+    )
+  }
+
+  const handleEdit = () => {
+    setIsEditing(true)
+    setError(null)
+    setSuccess(null)
+  }
+
+  const handleCancel = () => {
+    setIsEditing(false)
+    setError(null)
+    setSuccess(null)
+    // Reset form data to original profile data
+    if (profile) {
+      setFormData({
+        full_name: profile.full_name,
+        bio: profile.bio || '',
+        academic_field: profile.academic_field,
+        study_goals: profile.study_goals,
+        avatar_url: profile.avatar_url || '',
+        interests: profile.interests
+      })
+      setSelectedInterests(profile.interests || [])
+    }
+  }
+
+  const handleSave = async () => {
+    if (!session?.access_token) {
+      setError('Authentication required')
+      return
+    }
+
+    // Validation
+    if (!formData.full_name?.trim()) {
+      setError('Full name is required')
+      return
+    }
+
+    if (!formData.academic_field?.trim()) {
+      setError('Academic field is required')
+      return
+    }
+
+    if (!formData.study_goals?.trim()) {
+      setError('Study goals are required')
+      return
+    }
+
+    if (selectedInterests.length === 0) {
+      setError('Please select at least one interest')
+      return
+    }
+
+    setLoading(true)
+    setError(null)
+    setSuccess(null)
+
+    try {
+      const profileData = {
+        ...formData,
+        interests: selectedInterests,
+        full_name: formData.full_name?.trim() || '',
+        academic_field: formData.academic_field?.trim() || '',
+        study_goals: formData.study_goals?.trim() || '',
+        bio: formData.bio?.trim() || undefined
+      }
+
+      console.log('Profile submission data:', JSON.stringify(profileData, null, 2))
+      console.log('Form data:', JSON.stringify(formData, null, 2))
+      console.log('Selected interests:', selectedInterests)
+
+      // Use POST if profile doesn't exist, PUT if it does
+      const method = profile ? 'PUT' : 'POST'
+      
+      const response = await fetch('/api/profile', {
+        method,
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(profileData),
+      })
+
+      if (response.ok) {
+        await refreshProfile()
+        setIsEditing(false)
+        setSuccess(profile ? 'Profile updated successfully!' : 'Profile created successfully!')
+        setTimeout(() => setSuccess(null), 3000)
+      } else {
+        const errorData = await response.json()
+        console.error('Profile submission error:', errorData)
+        setError(errorData.error || `Failed to ${profile ? 'update' : 'create'} profile`)
+      }
+    } catch (error) {
+      console.error('Profile update error:', error)
+      setError('An unexpected error occurred')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (profileLoading || !profile) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-primary"></div>
+      <div className="min-h-screen flex items-center justify-center">
+        <LoadingSpinner />
       </div>
     )
   }
 
-  if (!user) {
-    return null
-  }
-
-  const tabs = [
-    { id: 'profile', label: 'Profile', icon: <User className="h-4 w-4" /> },
-    { id: 'preferences', label: 'Preferences', icon: <Palette className="h-4 w-4" /> },
-    { id: 'notifications', label: 'Notifications', icon: <Bell className="h-4 w-4" /> },
-    { id: 'security', label: 'Security', icon: <Shield className="h-4 w-4" /> },
-  ]
-
-  const handleSaveProfile = () => {
-    // Save profile data
-    setIsEditing(false)
-  }
-
-  const handleCancelEdit = () => {
-    // Reset form data
-    setIsEditing(false)
-  }
-
-  const handleAvatarUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
-    if (file) {
-      const reader = new FileReader()
-      reader.onload = (e) => {
-        const result = e.target?.result
-        if (result && typeof result === 'string') {
-          setProfileData({ ...profileData, avatar: result })
-        }
-      }
-      reader.readAsDataURL(file)
-    }
-  }
-
-  const handlePasswordChange = () => {
-    if (security.newPassword !== security.confirmPassword) {
-      alert('Passwords do not match')
-      return
-    }
-    // Update password
-    setSecurity({ ...security, currentPassword: '', newPassword: '', confirmPassword: '' })
-    alert('Password updated successfully')
-  }
-
-  const stats = [
-    { label: 'Courses Enrolled', value: '6', icon: <User className="h-5 w-5" /> },
-    { label: 'Assignments Completed', value: '24', icon: <Calendar className="h-5 w-5" /> },
-    { label: 'Study Hours', value: '156', icon: <Calendar className="h-5 w-5" /> },
-    { label: 'Achievement Points', value: '1,250', icon: <Calendar className="h-5 w-5" /> },
-  ]
-
   return (
-    <div className="min-h-screen bg-background">
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 py-8 px-4">
+      <div className="max-w-4xl mx-auto">
         {/* Header */}
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8">
+        <div className="flex justify-between items-center mb-8">
           <div>
-            <h1 className="text-3xl font-bold text-foreground mb-2">Profile Settings</h1>
-            <p className="text-muted-foreground">
-              Manage your account settings and preferences
-            </p>
+            <h1 className="text-3xl font-bold text-gray-900">My Profile</h1>
+            <p className="text-gray-600 mt-1">Manage your learning profile and preferences</p>
           </div>
-          <div className="flex space-x-3 mt-4 sm:mt-0">
-            <button className="flex items-center px-4 py-2 bg-secondary text-secondary-foreground rounded-lg hover:bg-secondary/80 transition-colors">
-              <Download className="h-4 w-4 mr-2" />
-              Export Data
-            </button>
-          </div>
+          
+          {!isEditing ? (
+            <Button onClick={handleEdit} className="flex items-center gap-2">
+              <Edit3 className="w-4 h-4" />
+              Edit Profile
+            </Button>
+          ) : (
+            <div className="flex gap-2">
+              <Button 
+                variant="outline" 
+                onClick={handleCancel}
+                className="flex items-center gap-2"
+              >
+                <X className="w-4 h-4" />
+                Cancel
+              </Button>
+              <Button 
+                onClick={handleSave}
+                disabled={loading}
+                className="flex items-center gap-2"
+              >
+                {loading ? (
+                  <>
+                    <LoadingSpinner />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4" />
+                    Save Changes
+                  </>
+                )}
+              </Button>
+            </div>
+          )}
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
-          {/* Sidebar */}
+        {/* Status Messages */}
+        {error && (
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-md">
+            <p className="text-red-600 text-sm">{error}</p>
+          </div>
+        )}
+
+        {success && (
+          <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-md">
+            <p className="text-green-600 text-sm">{success}</p>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {/* Profile Overview Card */}
           <div className="lg:col-span-1">
-            <div className="bg-card rounded-lg border border-border card-shadow">
-              {/* Profile Summary */}
-              <div className="p-6 border-b border-border">
-                <div className="flex flex-col items-center text-center">
-                  <div className="relative mb-4">
-                    <div className="w-20 h-20 bg-primary rounded-full flex items-center justify-center text-primary-foreground text-2xl font-bold">
-                      {profileData.avatar ? (
-                        <img
-                          src={profileData.avatar}
-                          alt="Profile"
-                          className="w-20 h-20 rounded-full object-cover"
-                        />
-                      ) : (
-                        `${profileData.firstName[0]}${profileData.lastName[0]}`
-                      )}
-                    </div>
-                    <button
-                      onClick={() => document.getElementById('avatar-upload')?.click()}
-                      className="absolute -bottom-1 -right-1 p-1 bg-secondary rounded-full border-2 border-background hover:bg-secondary/80 transition-colors"
-                    >
-                      <Camera className="h-3 w-3" />
-                    </button>
-                    <input
-                      id="avatar-upload"
-                      type="file"
-                      accept="image/*"
-                      onChange={handleAvatarUpload}
-                      className="hidden"
+            <Card className="p-6 shadow-lg">
+              <div className="text-center">
+                <div className="w-32 h-32 mx-auto bg-gray-200 rounded-full flex items-center justify-center mb-4">
+                  {profile.avatar_url ? (
+                    <img 
+                      src={profile.avatar_url} 
+                      alt="Profile" 
+                      className="w-full h-full rounded-full object-cover"
                     />
+                  ) : (
+                    <User className="w-16 h-16 text-gray-400" />
+                  )}
+                </div>
+                
+                <h2 className="text-xl font-semibold text-gray-900 mb-2">
+                  {profile.full_name}
+                </h2>
+                
+                <div className="flex items-center justify-center gap-2 text-gray-600 mb-4">
+                  <Mail className="w-4 h-4" />
+                  <span className="text-sm">{user?.email}</span>
+                </div>
+
+                {profile.bio && (
+                  <p className="text-gray-600 text-sm mb-4">{profile.bio}</p>
+                )}
+
+                <div className="space-y-2 text-sm text-gray-500">
+                  <div className="flex items-center justify-center gap-2">
+                    <Calendar className="w-4 h-4" />
+                    <span>Joined {new Date(profile.created_at).toLocaleDateString()}</span>
                   </div>
-                  <h3 className="text-lg font-semibold text-card-foreground">
-                    {profileData.firstName} {profileData.lastName}
-                  </h3>
-                  <p className="text-sm text-muted-foreground">{profileData.major}</p>
-                  <p className="text-sm text-muted-foreground">{profileData.year} • GPA: {profileData.gpa}</p>
+                  <div className="flex items-center justify-center gap-2">
+                    <Settings className="w-4 h-4" />
+                    <span>Last updated {new Date(profile.updated_at).toLocaleDateString()}</span>
+                  </div>
+                </div>
+              </div>
+            </Card>
+          </div>
+
+          {/* Profile Details */}
+          <div className="lg:col-span-2 space-y-6">
+            {/* Basic Information */}
+            <Card className="p-6 shadow-lg">
+              <div className="flex items-center gap-2 mb-6">
+                <User className="w-5 h-5 text-blue-500" />
+                <h3 className="text-xl font-semibold text-gray-900">Basic Information</h3>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <Label htmlFor="full_name">Full Name</Label>
+                  {isEditing ? (
+                    <Input
+                      id="full_name"
+                      type="text"
+                      value={formData.full_name || ''}
+                      onChange={(e) => updateFormData('full_name', e.target.value)}
+                      className="mt-1"
+                    />
+                  ) : (
+                    <p className="mt-1 text-gray-900">{profile.full_name}</p>
+                  )}
+                </div>
+
+                <div>
+                  <Label htmlFor="avatar_url">Profile Picture URL</Label>
+                  {isEditing ? (
+                    <Input
+                      id="avatar_url"
+                      type="url"
+                      value={formData.avatar_url || ''}
+                      onChange={(e) => updateFormData('avatar_url', e.target.value)}
+                      className="mt-1"
+                      placeholder="https://example.com/your-photo.jpg"
+                    />
+                  ) : (
+                    <p className="mt-1 text-gray-900">
+                      {profile.avatar_url || 'No profile picture set'}
+                    </p>
+                  )}
                 </div>
               </div>
 
-              {/* Navigation */}
-              <div className="p-2">
-                {tabs.map((tab) => (
-                  <button
-                    key={tab.id}
-                    onClick={() => setActiveTab(tab.id)}
-                    className={`w-full flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors ${
-                      activeTab === tab.id
-                        ? 'bg-primary text-primary-foreground'
-                        : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                    }`}
-                  >
-                    {tab.icon}
-                    <span className="ml-3">{tab.label}</span>
-                  </button>
-                ))}
+              <div className="mt-6">
+                <Label htmlFor="bio">Bio</Label>
+                {isEditing ? (
+                  <Textarea
+                    id="bio"
+                    value={formData.bio || ''}
+                    onChange={(e) => updateFormData('bio', e.target.value)}
+                    className="mt-1"
+                    rows={3}
+                    placeholder="Tell us about yourself..."
+                  />
+                ) : (
+                  <p className="mt-1 text-gray-900">
+                    {profile.bio || 'No bio provided'}
+                  </p>
+                )}
               </div>
-            </div>
+            </Card>
 
-            {/* Stats */}
-            <div className="bg-card rounded-lg border border-border card-shadow mt-6">
-              <div className="p-6">
-                <h3 className="text-lg font-semibold text-card-foreground mb-4">Quick Stats</h3>
-                <div className="space-y-4">
-                  {stats.map((stat, index) => (
-                    <div key={index} className="flex items-center justify-between">
-                      <div className="flex items-center space-x-3">
-                        <div className="p-2 bg-muted rounded-lg">
-                          {stat.icon}
-                        </div>
-                        <span className="text-sm text-muted-foreground">{stat.label}</span>
+            {/* Academic Information */}
+            <Card className="p-6 shadow-lg">
+              <div className="flex items-center gap-2 mb-6">
+                <BookOpen className="w-5 h-5 text-blue-500" />
+                <h3 className="text-xl font-semibold text-gray-900">Academic Background</h3>
+              </div>
+
+              <div className="space-y-6">
+                <div>
+                  <Label htmlFor="academic_field">Field of Study</Label>
+                  {isEditing ? (
+                    <Input
+                      id="academic_field"
+                      type="text"
+                      value={formData.academic_field || ''}
+                      onChange={(e) => updateFormData('academic_field', e.target.value)}
+                      className="mt-1"
+                    />
+                  ) : (
+                    <p className="mt-1 text-gray-900">{profile.academic_field}</p>
+                  )}
+                </div>
+
+                <div>
+                  <Label htmlFor="study_goals">Learning Goals</Label>
+                  {isEditing ? (
+                    <Textarea
+                      id="study_goals"
+                      value={formData.study_goals || ''}
+                      onChange={(e) => updateFormData('study_goals', e.target.value)}
+                      className="mt-1"
+                      rows={4}
+                    />
+                  ) : (
+                    <p className="mt-1 text-gray-900 whitespace-pre-wrap">{profile.study_goals}</p>
+                  )}
+                </div>
+              </div>
+            </Card>
+
+            {/* Learning Interests */}
+            <Card className="p-6 shadow-lg">
+              <div className="flex items-center gap-2 mb-6">
+                <Heart className="w-5 h-5 text-blue-500" />
+                <h3 className="text-xl font-semibold text-gray-900">Learning Interests</h3>
+              </div>
+
+              {isEditing ? (
+                <div className="space-y-6">
+                  {interestCategories.map((category) => (
+                    <div key={category.id} className="space-y-3">
+                      <h4 className="font-medium text-gray-800">{category.name}</h4>
+                      <p className="text-sm text-gray-600">{category.description}</p>
+                      <div className="flex flex-wrap gap-2">
+                        {category.interests.map((interest) => (
+                          <Badge
+                            key={interest}
+                            variant={selectedInterests.includes(interest) ? "default" : "outline"}
+                            className={`cursor-pointer transition-colors ${
+                              selectedInterests.includes(interest)
+                                ? 'bg-blue-500 hover:bg-blue-600 text-white'
+                                : 'hover:bg-blue-50 hover:border-blue-300'
+                            }`}
+                            onClick={() => toggleInterest(interest)}
+                          >
+                            {interest}
+                          </Badge>
+                        ))}
                       </div>
-                      <span className="text-sm font-medium text-card-foreground">{stat.value}</span>
+                      <Separator className="my-4" />
                     </div>
                   ))}
                 </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Main Content */}
-          <div className="lg:col-span-3">
-            <div className="bg-card rounded-lg border border-border card-shadow">
-              {/* Profile Tab */}
-              {activeTab === 'profile' && (
-                <div className="p-6">
-                  <div className="flex items-center justify-between mb-6">
-                    <h2 className="text-xl font-semibold text-card-foreground">Profile Information</h2>
-                    {!isEditing ? (
-                      <button
-                        onClick={() => setIsEditing(true)}
-                        className="flex items-center px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
-                      >
-                        <Edit className="h-4 w-4 mr-2" />
-                        Edit Profile
-                      </button>
-                    ) : (
-                      <div className="flex space-x-2">
-                        <button
-                          onClick={handleCancelEdit}
-                          className="flex items-center px-4 py-2 bg-secondary text-secondary-foreground rounded-lg hover:bg-secondary/80 transition-colors"
-                        >
-                          <X className="h-4 w-4 mr-2" />
-                          Cancel
-                        </button>
-                        <button
-                          onClick={handleSaveProfile}
-                          className="flex items-center px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
-                        >
-                          <Save className="h-4 w-4 mr-2" />
-                          Save Changes
-                        </button>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                      <label className="block text-sm font-medium text-card-foreground mb-2">
-                        First Name
-                      </label>
-                      <input
-                        type="text"
-                        value={profileData.firstName}
-                        onChange={(e) => setProfileData({ ...profileData, firstName: e.target.value })}
-                        disabled={!isEditing}
-                        className="w-full px-3 py-2 border border-border rounded-lg bg-background text-foreground focus-ring disabled:opacity-50 disabled:cursor-not-allowed"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-card-foreground mb-2">
-                        Last Name
-                      </label>
-                      <input
-                        type="text"
-                        value={profileData.lastName}
-                        onChange={(e) => setProfileData({ ...profileData, lastName: e.target.value })}
-                        disabled={!isEditing}
-                        className="w-full px-3 py-2 border border-border rounded-lg bg-background text-foreground focus-ring disabled:opacity-50 disabled:cursor-not-allowed"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-card-foreground mb-2">
-                        Email
-                      </label>
-                      <input
-                        type="email"
-                        value={profileData.email}
-                        onChange={(e) => setProfileData({ ...profileData, email: e.target.value })}
-                        disabled={!isEditing}
-                        className="w-full px-3 py-2 border border-border rounded-lg bg-background text-foreground focus-ring disabled:opacity-50 disabled:cursor-not-allowed"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-card-foreground mb-2">
-                        Phone
-                      </label>
-                      <input
-                        type="tel"
-                        value={profileData.phone}
-                        onChange={(e) => setProfileData({ ...profileData, phone: e.target.value })}
-                        disabled={!isEditing}
-                        className="w-full px-3 py-2 border border-border rounded-lg bg-background text-foreground focus-ring disabled:opacity-50 disabled:cursor-not-allowed"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-card-foreground mb-2">
-                        Location
-                      </label>
-                      <input
-                        type="text"
-                        value={profileData.location}
-                        onChange={(e) => setProfileData({ ...profileData, location: e.target.value })}
-                        disabled={!isEditing}
-                        className="w-full px-3 py-2 border border-border rounded-lg bg-background text-foreground focus-ring disabled:opacity-50 disabled:cursor-not-allowed"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-card-foreground mb-2">
-                        Date of Birth
-                      </label>
-                      <input
-                        type="date"
-                        value={profileData.dateOfBirth}
-                        onChange={(e) => setProfileData({ ...profileData, dateOfBirth: e.target.value })}
-                        disabled={!isEditing}
-                        className="w-full px-3 py-2 border border-border rounded-lg bg-background text-foreground focus-ring disabled:opacity-50 disabled:cursor-not-allowed"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-card-foreground mb-2">
-                        Major
-                      </label>
-                      <input
-                        type="text"
-                        value={profileData.major}
-                        onChange={(e) => setProfileData({ ...profileData, major: e.target.value })}
-                        disabled={!isEditing}
-                        className="w-full px-3 py-2 border border-border rounded-lg bg-background text-foreground focus-ring disabled:opacity-50 disabled:cursor-not-allowed"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-card-foreground mb-2">
-                        Academic Year
-                      </label>
-                      <select
-                        value={profileData.year}
-                        onChange={(e) => setProfileData({ ...profileData, year: e.target.value })}
-                        disabled={!isEditing}
-                        className="w-full px-3 py-2 border border-border rounded-lg bg-background text-foreground focus-ring disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        <option value="Freshman">Freshman</option>
-                        <option value="Sophomore">Sophomore</option>
-                        <option value="Junior">Junior</option>
-                        <option value="Senior">Senior</option>
-                        <option value="Graduate">Graduate</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="mt-6">
-                    <label className="block text-sm font-medium text-card-foreground mb-2">
-                      Bio
-                    </label>
-                    <textarea
-                      value={profileData.bio}
-                      onChange={(e) => setProfileData({ ...profileData, bio: e.target.value })}
-                      disabled={!isEditing}
-                      rows={4}
-                      className="w-full px-3 py-2 border border-border rounded-lg bg-background text-foreground focus-ring disabled:opacity-50 disabled:cursor-not-allowed"
-                      placeholder="Tell us about yourself..."
-                    />
-                  </div>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {profile.interests && profile.interests.length > 0 ? (
+                    profile.interests.map((interest) => (
+                      <Badge key={interest} className="bg-blue-500 text-white">
+                        {interest}
+                      </Badge>
+                    ))
+                  ) : (
+                    <p className="text-gray-500">No interests selected</p>
+                  )}
                 </div>
               )}
-
-              {/* Preferences Tab */}
-              {activeTab === 'preferences' && (
-                <div className="p-6">
-                  <h2 className="text-xl font-semibold text-card-foreground mb-6">Preferences</h2>
-                  
-                  <div className="space-y-6">
-                    <div>
-                      <label className="block text-sm font-medium text-card-foreground mb-2">
-                        Theme
-                      </label>
-                      <select
-                        value={preferences.theme}
-                        onChange={(e) => setPreferences({ ...preferences, theme: e.target.value })}
-                        className="w-full px-3 py-2 border border-border rounded-lg bg-background text-foreground focus-ring"
-                      >
-                        <option value="light">Light</option>
-                        <option value="dark">Dark</option>
-                        <option value="system">System</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-card-foreground mb-2">
-                        Language
-                      </label>
-                      <select
-                        value={preferences.language}
-                        onChange={(e) => setPreferences({ ...preferences, language: e.target.value })}
-                        className="w-full px-3 py-2 border border-border rounded-lg bg-background text-foreground focus-ring"
-                      >
-                        <option value="en">English</option>
-                        <option value="es">Spanish</option>
-                        <option value="fr">French</option>
-                        <option value="de">German</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-card-foreground mb-2">
-                        Timezone
-                      </label>
-                      <select
-                        value={preferences.timezone}
-                        onChange={(e) => setPreferences({ ...preferences, timezone: e.target.value })}
-                        className="w-full px-3 py-2 border border-border rounded-lg bg-background text-foreground focus-ring"
-                      >
-                        <option value="America/New_York">Eastern Time (ET)</option>
-                        <option value="America/Chicago">Central Time (CT)</option>
-                        <option value="America/Denver">Mountain Time (MT)</option>
-                        <option value="America/Los_Angeles">Pacific Time (PT)</option>
-                      </select>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Notifications Tab */}
-              {activeTab === 'notifications' && (
-                <div className="p-6">
-                  <h2 className="text-xl font-semibold text-card-foreground mb-6">Notification Settings</h2>
-                  
-                  <div className="space-y-6">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h3 className="text-sm font-medium text-card-foreground">Email Notifications</h3>
-                        <p className="text-sm text-muted-foreground">Receive notifications via email</p>
-                      </div>
-                      <label className="relative inline-flex items-center cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={preferences.emailNotifications}
-                          onChange={(e) => setPreferences({ ...preferences, emailNotifications: e.target.checked })}
-                          className="sr-only peer"
-                        />
-                        <div className="w-11 h-6 bg-muted peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
-                      </label>
-                    </div>
-
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h3 className="text-sm font-medium text-card-foreground">Push Notifications</h3>
-                        <p className="text-sm text-muted-foreground">Receive push notifications in browser</p>
-                      </div>
-                      <label className="relative inline-flex items-center cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={preferences.pushNotifications}
-                          onChange={(e) => setPreferences({ ...preferences, pushNotifications: e.target.checked })}
-                          className="sr-only peer"
-                        />
-                        <div className="w-11 h-6 bg-muted peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
-                      </label>
-                    </div>
-
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h3 className="text-sm font-medium text-card-foreground">Weekly Digest</h3>
-                        <p className="text-sm text-muted-foreground">Get a weekly summary of your progress</p>
-                      </div>
-                      <label className="relative inline-flex items-center cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={preferences.weeklyDigest}
-                          onChange={(e) => setPreferences({ ...preferences, weeklyDigest: e.target.checked })}
-                          className="sr-only peer"
-                        />
-                        <div className="w-11 h-6 bg-muted peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
-                      </label>
-                    </div>
-
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h3 className="text-sm font-medium text-card-foreground">Course Reminders</h3>
-                        <p className="text-sm text-muted-foreground">Reminders for upcoming classes</p>
-                      </div>
-                      <label className="relative inline-flex items-center cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={preferences.courseReminders}
-                          onChange={(e) => setPreferences({ ...preferences, courseReminders: e.target.checked })}
-                          className="sr-only peer"
-                        />
-                        <div className="w-11 h-6 bg-muted peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
-                      </label>
-                    </div>
-
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h3 className="text-sm font-medium text-card-foreground">Assignment Deadlines</h3>
-                        <p className="text-sm text-muted-foreground">Alerts for upcoming assignment due dates</p>
-                      </div>
-                      <label className="relative inline-flex items-center cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={preferences.assignmentDeadlines}
-                          onChange={(e) => setPreferences({ ...preferences, assignmentDeadlines: e.target.checked })}
-                          className="sr-only peer"
-                        />
-                        <div className="w-11 h-6 bg-muted peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
-                      </label>
-                    </div>
-
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h3 className="text-sm font-medium text-card-foreground">Study Group Invites</h3>
-                        <p className="text-sm text-muted-foreground">Notifications for study group invitations</p>
-                      </div>
-                      <label className="relative inline-flex items-center cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={preferences.studyGroupInvites}
-                          onChange={(e) => setPreferences({ ...preferences, studyGroupInvites: e.target.checked })}
-                          className="sr-only peer"
-                        />
-                        <div className="w-11 h-6 bg-muted peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
-                      </label>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Security Tab */}
-              {activeTab === 'security' && (
-                <div className="p-6">
-                  <h2 className="text-xl font-semibold text-card-foreground mb-6">Security Settings</h2>
-                  
-                  <div className="space-y-8">
-                    {/* Change Password */}
-                    <div>
-                      <h3 className="text-lg font-medium text-card-foreground mb-4">Change Password</h3>
-                      <div className="space-y-4">
-                        <div>
-                          <label className="block text-sm font-medium text-card-foreground mb-2">
-                            Current Password
-                          </label>
-                          <div className="relative">
-                            <input
-                              type={showPassword ? 'text' : 'password'}
-                              value={security.currentPassword}
-                              onChange={(e) => setSecurity({ ...security, currentPassword: e.target.value })}
-                              className="w-full px-3 py-2 pr-10 border border-border rounded-lg bg-background text-foreground focus-ring"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => setShowPassword(!showPassword)}
-                              className="absolute inset-y-0 right-0 pr-3 flex items-center"
-                            >
-                              {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                            </button>
-                          </div>
-                        </div>
-
-                        <div>
-                          <label className="block text-sm font-medium text-card-foreground mb-2">
-                            New Password
-                          </label>
-                          <input
-                            type="password"
-                            value={security.newPassword}
-                            onChange={(e) => setSecurity({ ...security, newPassword: e.target.value })}
-                            className="w-full px-3 py-2 border border-border rounded-lg bg-background text-foreground focus-ring"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-sm font-medium text-card-foreground mb-2">
-                            Confirm New Password
-                          </label>
-                          <input
-                            type="password"
-                            value={security.confirmPassword}
-                            onChange={(e) => setSecurity({ ...security, confirmPassword: e.target.value })}
-                            className="w-full px-3 py-2 border border-border rounded-lg bg-background text-foreground focus-ring"
-                          />
-                        </div>
-
-                        <button
-                          onClick={handlePasswordChange}
-                          className="flex items-center px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
-                        >
-                          <Save className="h-4 w-4 mr-2" />
-                          Update Password
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Two-Factor Authentication */}
-                    <div className="border-t border-border pt-8">
-                      <div className="flex items-center justify-between mb-4">
-                        <div>
-                          <h3 className="text-lg font-medium text-card-foreground">Two-Factor Authentication</h3>
-                          <p className="text-sm text-muted-foreground">Add an extra layer of security to your account</p>
-                        </div>
-                        <label className="relative inline-flex items-center cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={security.twoFactorEnabled}
-                            onChange={(e) => setSecurity({ ...security, twoFactorEnabled: e.target.checked })}
-                            className="sr-only peer"
-                          />
-                          <div className="w-11 h-6 bg-muted peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
-                        </label>
-                      </div>
-                    </div>
-
-                    {/* Login Alerts */}
-                    <div className="border-t border-border pt-8">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <h3 className="text-lg font-medium text-card-foreground">Login Alerts</h3>
-                          <p className="text-sm text-muted-foreground">Get notified of new login attempts</p>
-                        </div>
-                        <label className="relative inline-flex items-center cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={security.loginAlerts}
-                            onChange={(e) => setSecurity({ ...security, loginAlerts: e.target.checked })}
-                            className="sr-only peer"
-                          />
-                          <div className="w-11 h-6 bg-muted peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
-                        </label>
-                      </div>
-                    </div>
-
-                    {/* Danger Zone */}
-                    <div className="border-t border-border pt-8">
-                      <h3 className="text-lg font-medium text-red-600 mb-4">Danger Zone</h3>
-                      <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <h4 className="text-sm font-medium text-red-800">Delete Account</h4>
-                            <p className="text-sm text-red-600">Permanently delete your account and all data</p>
-                          </div>
-                          <button className="flex items-center px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors">
-                            <Trash2 className="h-4 w-4 mr-2" />
-                            Delete Account
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
+            </Card>
           </div>
         </div>
       </div>

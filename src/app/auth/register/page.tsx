@@ -1,14 +1,15 @@
 'use client'
 
 import { useState } from 'react'
+import React from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
-import { Eye, EyeOff, Mail, Lock, User, Check, CheckCircle, AlertCircle } from 'lucide-react'
-import { validateEmail, getUserFriendlyErrorMessage, EmailValidationResult } from '@/lib/emailValidation'
+import { Eye, EyeOff, Mail, Lock, User, Check, CheckCircle, AlertCircle, BookOpen, GraduationCap } from 'lucide-react'
+import { validateEmailWithExistenceCheck, getUserFriendlyErrorMessage, EmailValidationResult } from '@/lib/emailValidation'
 
 export default function RegisterPage() {
   const { signUp } = useAuth()
@@ -18,7 +19,8 @@ export default function RegisterPage() {
     lastName: '',
     email: '',
     password: '',
-    confirmPassword: ''
+    confirmPassword: '',
+    role: 'student' // Default to student
   })
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
@@ -36,22 +38,68 @@ export default function RegisterPage() {
     })
   }
 
+  const handleRoleChange = (role: 'student' | 'tutor') => {
+    setFormData({
+      ...formData,
+      role
+    })
+  }
+
+  // Add ref to track the latest validation request
+  const validationTimeoutRef = React.useRef<NodeJS.Timeout | null>(null)
+  const validationAbortControllerRef = React.useRef<AbortController | null>(null)
+
   const handleEmailChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const newEmail = e.target.value
     setFormData(prev => ({ ...prev, email: newEmail }))
     setEmailTouched(true)
     
+    // Clear any existing timeout
+    if (validationTimeoutRef.current) {
+      clearTimeout(validationTimeoutRef.current)
+    }
+    
+    // Abort any ongoing validation request
+    if (validationAbortControllerRef.current) {
+      validationAbortControllerRef.current.abort()
+    }
+    
     if (newEmail && newEmail.includes('@')) {
       setEmailValidating(true)
-      try {
-        // For registration, use full validation (client + server with domain and mailbox checks)
-        const result = await validateEmail(newEmail)
-        setEmailValidation(result)
-      } catch (error) {
-        console.error('Email validation error:', error)
-      } finally {
-        setEmailValidating(false)
-      }
+      
+      // Debounce the validation by 500ms
+      validationTimeoutRef.current = setTimeout(async () => {
+        try {
+          // Create new abort controller for this request
+          const abortController = new AbortController()
+          validationAbortControllerRef.current = abortController
+          
+          // For registration, use full validation with existence check
+          const result = await validateEmailWithExistenceCheck(newEmail, {
+            checkExists: true,
+            checkDomain: true,
+            checkMailbox: true
+          })
+          
+          // Only update state if this request wasn't aborted
+          if (!abortController.signal.aborted) {
+            setEmailValidation(result)
+            setEmailValidating(false)
+          }
+        } catch (error) {
+          if (error.name !== 'AbortError') {
+            console.error('Email validation error:', error)
+            setEmailValidation({
+              isValid: false,
+              errors: ['Validation failed'],
+              warnings: [],
+              validationSteps: { format: false, domain: false, mailbox: false },
+              processingTime: 0
+            })
+          }
+          setEmailValidating(false)
+        }
+      }, 500)
     } else {
       setEmailValidation(null)
       setEmailValidating(false)
@@ -85,14 +133,34 @@ export default function RegisterPage() {
     }
 
     try {
-      await signUp(formData.email, formData.password, `${formData.firstName} ${formData.lastName}`)
-      setSuccess('Account created successfully! Please check your email to verify your account.')
-      // Optionally redirect after a delay
-      setTimeout(() => {
-        router.push('/auth/login')
-      }, 3000)
+      const { error } = await signUp(formData.email, formData.password, `${formData.firstName} ${formData.lastName}`, formData.role)
+      
+      if (error) {
+        // Check for duplicate email error
+        if (error.message?.includes('User already registered') || 
+            error.message?.includes('already registered') ||
+            error.message?.includes('already exists') ||
+            error.code === 'user_already_exists') {
+          setError('An account with this email already exists. Please try logging in instead.')
+        } else {
+          setError(error.message || 'Failed to create account')
+        }
+      } else {
+        setSuccess('Account created successfully! Please check your email to verify your account.')
+        // Optionally redirect after a delay
+        setTimeout(() => {
+          router.push('/auth/login')
+        }, 3000)
+      }
     } catch (err: any) {
-      setError(err.message || 'Failed to create account')
+      // Fallback error handling
+      if (err.message?.includes('User already registered') || 
+          err.message?.includes('already registered') ||
+          err.message?.includes('already exists')) {
+        setError('An account with this email already exists. Please try logging in instead.')
+      } else {
+        setError(err.message || 'Failed to create account')
+      }
     } finally {
       setLoading(false)
     }
@@ -122,6 +190,16 @@ export default function RegisterPage() {
               {error && (
                 <div className="p-3 text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-md">
                   {error}
+                  {error.includes('An account with this email already exists') && (
+                    <div className="mt-2">
+                      <Link 
+                        href="/auth/login" 
+                        className="text-primary hover:underline font-medium"
+                      >
+                        Go to login page →
+                      </Link>
+                    </div>
+                  )}
                 </div>
               )}
               
@@ -130,6 +208,46 @@ export default function RegisterPage() {
                   {success}
                 </div>
               )}
+
+              {/* Role Selection */}
+              <div className="space-y-3">
+                <label className="text-sm font-medium text-foreground">
+                  I want to join as a
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => handleRoleChange('student')}
+                    className={`p-4 border-2 rounded-lg transition-all duration-200 ${
+                      formData.role === 'student'
+                        ? 'border-primary bg-primary/5 text-primary'
+                        : 'border-border hover:border-primary/50 text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    <div className="flex flex-col items-center space-y-2">
+                      <BookOpen className="h-6 w-6" />
+                      <span className="font-medium">Student</span>
+                      <span className="text-xs text-center">Learn and grow with personalized education</span>
+                    </div>
+                  </button>
+                  
+                  <button
+                    type="button"
+                    onClick={() => handleRoleChange('tutor')}
+                    className={`p-4 border-2 rounded-lg transition-all duration-200 ${
+                      formData.role === 'tutor'
+                        ? 'border-primary bg-primary/5 text-primary'
+                        : 'border-border hover:border-primary/50 text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    <div className="flex flex-col items-center space-y-2">
+                      <GraduationCap className="h-6 w-6" />
+                      <span className="font-medium">Tutor</span>
+                      <span className="text-xs text-center">Share knowledge and teach students</span>
+                    </div>
+                  </button>
+                </div>
+              </div>
               
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">

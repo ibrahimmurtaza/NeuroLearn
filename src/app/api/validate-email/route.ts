@@ -98,10 +98,32 @@ function validateEmailFormat(email: string): boolean {
   return EMAIL_REGEX.test(email);
 }
 
+// Common email providers that we know are valid
+const TRUSTED_EMAIL_DOMAINS = new Set([
+  'gmail.com', 'googlemail.com', 'yahoo.com', 'yahoo.co.uk', 'yahoo.ca', 'yahoo.com.au',
+  'hotmail.com', 'outlook.com', 'live.com', 'msn.com', 'hotmail.co.uk', 'hotmail.fr',
+  'aol.com', 'icloud.com', 'me.com', 'mac.com', 'protonmail.com', 'proton.me',
+  'zoho.com', 'yandex.com', 'mail.ru', 'qq.com', '163.com', '126.com',
+  'edu', 'ac.uk', 'edu.au', 'edu.ca', 'org', 'gov', 'mil'
+]);
+
 /**
- * Domain validation using DNS lookup
+ * Domain validation using DNS lookup with fallback for trusted domains
  */
 async function validateDomain(domain: string, timeout: number = DEFAULT_TIMEOUT): Promise<boolean> {
+  // Check if it's a trusted domain first
+  const lowerDomain = domain.toLowerCase();
+  if (TRUSTED_EMAIL_DOMAINS.has(lowerDomain)) {
+    return true;
+  }
+  
+  // Check if it ends with a trusted TLD
+  for (const trustedDomain of TRUSTED_EMAIL_DOMAINS) {
+    if (lowerDomain.endsWith('.' + trustedDomain)) {
+      return true;
+    }
+  }
+  
   try {
     const timeoutPromise = new Promise<never>((_, reject) => {
       setTimeout(() => reject(new Error('DNS lookup timeout')), timeout);
@@ -114,6 +136,19 @@ async function validateDomain(domain: string, timeout: number = DEFAULT_TIMEOUT)
     
     return true;
   } catch (error) {
+    // For unknown domains, if DNS fails, we'll be more lenient
+    // and just check if the domain format is valid
+    console.warn(`DNS lookup failed for domain ${domain}:`, error);
+    
+    // Basic domain format validation as fallback
+    const domainRegex = /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?))*$/;
+    const isValidFormat = domainRegex.test(domain) && domain.includes('.') && domain.length <= 253;
+    
+    if (isValidFormat) {
+      console.info(`Domain ${domain} has valid format, allowing despite DNS lookup failure`);
+      return true;
+    }
+    
     return false;
   }
 }
